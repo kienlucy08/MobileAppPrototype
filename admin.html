@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field Collect — Dev team</title>
+<style>
+  :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --good:#16a34a; --bad:#dc2626; --warn:#d97706; --blue:#2563eb; --primary:#0f766e; }
+  * { box-sizing: border-box; } body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: #f3f5f7; }
+  header { background: #0b3b39; color: #fff; padding: 12px 20px; display: flex; align-items: baseline; gap: 12px; } header b { font-size: 17px; } header small { opacity: .75; }
+  main { padding: 16px 20px 40px; max-width: 1100px; margin: 0 auto; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 22px 0 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; } .tile { background: #fff; border-radius: 10px; padding: 10px 12px; } .tile b { font-size: 22px; display: block; } .tile small { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; } th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; } th { font-size: 12px; color: var(--muted); background: #fafbfc; }
+  tr.click { cursor: pointer; } tr.click:hover { background: #f8fafc; }
+  .pill { font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 3px 8px; background: #e2e8f0; white-space: nowrap; } .pill.ok { background: #dcfce7; color: #166534; } .pill.bad { background: #fee2e2; color: #991b1b; } .pill.warn { background: #fef3c7; color: #92400e; } .pill.blue { background: #dbeafe; color: #1e40af; }
+  code.chip { background: #eef2f6; border-radius: 5px; padding: 1px 6px; font-size: 12px; } code.err { background: #fee2e2; color: #991b1b; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; min-width: 70px; } .bar i { display: block; height: 100%; background: var(--good); }
+  .detail { background: #fff; border-radius: 10px; padding: 12px 14px; margin: 6px 0 12px; } .detail pre { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 8px; max-height: 260px; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+  .gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; margin-top: 8px; } .gal img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: #e2e8f0; }
+  button, select, input { font: inherit; } button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 10px; cursor: pointer; font-weight: 600; } button.primary { background: var(--primary); color: #fff; border-color: var(--primary); } button.danger { color: var(--bad); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .muted { color: var(--muted); } .empty { padding: 18px; text-align: center; color: var(--muted); background: #fff; border-radius: 10px; }
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 2px 10px; font-size: 13px; } .kv dt { color: var(--muted); } .kv dd { margin: 0; }
+</style>
+</head>
+<body>
+<header><b>Field Collect — Dev team</b><small>live server view · refreshes every 2 s</small></header>
+<main>
+  <div class="tiles" id="tiles"></div>
+  <h2>Problem reports from the field</h2><div id="issues"></div>
+  <h2>Surveys &amp; scope of work</h2><p class="muted" style="margin:0 0 6px">Phones group their survey library by scope. Edit a scope and press Enter; phones pick it up the next time they have signal.</p><div id="forms"></div>
+  <h2>Team surveys (shared records)</h2><div id="shared"></div>
+  <h2>Records</h2><div id="records"></div>
+  <h2>Organizations &amp; members (what the identity lookup returns)</h2>
+  <p class="muted" style="margin:0 0 6px">The form's organization list shows only the organizations the signed-in user's email belongs to. JSON: [{"id","name","members":["email",…]}]</p>
+  <textarea id="orgs" rows="9" style="width:100%;font:12px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+  <div class="row" style="margin-top:6px"><button class="primary" id="saveorgs">Save organizations</button><span id="orgmsg" class="muted"></span></div>
+  <h2>Users (the FieldSync accounts the mobile app signs in with)</h2>
+  <p class="muted" style="margin:0 0 6px">provider: "microsoft" or "password". Remove a user and their phone's session ends; records they already sent stay, still attributed to them. <span id="sess"></span></p>
+  <textarea id="users" rows="10" style="width:100%;font:12px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+  <div class="row" style="margin-top:6px"><button class="primary" id="saveusers">Save users</button><span id="usermsg" class="muted"></span></div>
+  <h2>Controls</h2>
+  <div class="row"><label>Require form version ≥ <input id="minv" type="number" min="1" style="width:70px"></label><button id="setmin">Apply</button><button class="danger" id="reset">Reset all demo data</button></div>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ago = (ts) => { const s = Math.round((Date.now() - ts) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`; };
+const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
+const open = new Set(); let issueDetail = {}; let lastOverview = null;
+
+async function api(path, opts) { const r = await fetch(path, opts); return r.json(); }
+
+let orgsDirty = false, usersDirty = false;
+function render(o) {
+  if (!usersDirty && document.activeElement !== $('users')) $('users').value = JSON.stringify(o.users || [], null, 2);
+  $('sess').textContent = `${o.sessions} active session(s).`;
+  if (!orgsDirty && document.activeElement !== $('orgs')) $('orgs').value = JSON.stringify(o.orgs || [], null, 2);
+  const st = o.stats;
+  $('tiles').innerHTML = [['Records committed', st.records], ['Photos on server', st.receivedItems], ['Duplicates prevented', st.dupesPrevented], ['Team surveys open', st.sharedOpen], ['Open reports', st.issuesOpen], ['Min form version', st.minSchema]]
+    .map(([l, v]) => `<div class="tile"><b>${v}</b><small>${l}</small></div>`).join('');
+  $('minv').placeholder = st.minSchema;
+  if (!$('forms').contains(document.activeElement)) $('forms').innerHTML = (o.forms || []).length ? `<table><tr><th>Survey</th><th>Version</th><th>Scope of work</th></tr>${o.forms.map((f) => `<tr><td>${esc(f.title)}</td><td>v${f.version}</td><td><input data-form="${esc(f.id)}" value="${esc(f.scope || '')}" placeholder="Other" style="border:1px solid var(--line);border-radius:6px;padding:4px 6px"></td></tr>`).join('')}</table>` : '<p class="muted">No surveys published yet.</p>';
+
+  $('issues').innerHTML = o.issues.length ? `<table><tr><th>When</th><th>From</th><th>Code</th><th>Message</th><th>Log</th><th>Status</th></tr>${o.issues.map((i) => `
+    <tr class="click" data-issue="${i.id}"><td>${ago(i.ts)}</td><td>${esc(i.user)}<br><small class="muted">${esc(i.device)} · ${esc(i.appVersion)}</small></td>
+    <td>${i.code ? `<code class="chip err">${esc(i.code)}</code>` : '—'}</td><td>${esc(i.message) || '<span class="muted">(no message)</span>'}</td><td>${i.logLines} lines</td>
+    <td><select data-status="${i.id}">${['open', 'triaged', 'resolved'].map((s) => `<option ${s === i.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td></tr>
+    ${open.has('i' + i.id) && issueDetail[i.id] ? `<tr><td colspan="6"><div class="detail">${issueHtml(issueDetail[i.id])}</div></td></tr>` : ''}`).join('')}</table>` : '<div class="empty">No reports. When a field user taps “Report a problem” (or a record fails) it appears here with the log attached.</div>';
+
+  $('shared').innerHTML = o.shared.length ? `<table><tr><th>Record</th><th>Started by</th><th>Photos received</th><th>Edits</th><th>Status</th></tr>${o.shared.map((s) => `
+    <tr><td><b>${esc(s.title)}</b></td><td>${esc(s.createdByName)}</td><td><div class="bar"><i style="width:${s.photos ? (s.photosReceived / s.photos) * 100 : 0}%"></i></div>${s.photosReceived}/${s.photos}</td><td>${s.rev}</td>
+    <td>${s.status === 'submitted' ? `<span class="pill ok">Submitted #${s.recordId}</span>${s.amended ? ' <span class="pill warn">amended</span>' : ''}` : '<span class="pill blue">Open</span>'}</td></tr>`).join('')}</table>` : '<div class="empty">No team surveys yet.</div>';
+
+  $('records').innerHTML = o.records.length ? `<table><tr><th>Record</th><th>By</th><th>Type</th><th>Photos</th><th>Size</th><th>Form</th><th>Status</th></tr>${o.records.map((r) => `
+    <tr class="click" data-rec="${r.id}"><td><b>${esc(r.label)}</b></td><td>${esc(r.by) || '—'}</td><td>${r.shared ? 'Team' : 'Single'}</td><td>${r.photos}/${r.expected || r.photos}</td><td>${mb(r.bytes)}</td><td>v${r.schemaVersion}</td>
+    <td>${r.committed ? `<span class="pill ok">#${r.recordId}</span>` : '<span class="pill warn">in progress</span>'}</td></tr>
+    ${open.has('r' + r.id) ? `<tr><td colspan="7"><div class="gal">${r.sample.map((p) => `<img loading="lazy" src="/api/media/${r.id}/${p}" alt="">`).join('') || '<span class="muted">No photos yet</span>'}</div></td></tr>` : ''}`).join('')}</table>` : '<div class="empty">No records yet.</div>';
+}
+
+function issueHtml(i) {
+  const lines = (i.log || []).slice(-60).map((l) => `${new Date(l.ts).toLocaleTimeString()} ${l.level.toUpperCase().padEnd(5)} ${l.code || ''} ${l.msg}`).join('\n');
+  return `<dl class="kv"><dt>Reporter</dt><dd>${esc(i.user)} (${esc(i.device)})</dd><dt>App</dt><dd>${esc(i.appVersion)}</dd><dt>Network</dt><dd>${esc(JSON.stringify(i.network))}</dd>
+    <dt>Queue</dt><dd>${esc(JSON.stringify(i.summary))}</dd><dt>Device</dt><dd>${esc(i.ua)}</dd>${i.record ? `<dt>Record</dt><dd>${esc(i.record.label)} · ${esc(i.record.status)} · ${i.record.media.length} photos${i.record.error ? ` · <code class="chip err">${esc(i.record.error.code)}</code> ${esc(i.record.error.detail)}` : ''}</dd>` : ''}</dl>
+    <pre>${esc(lines)}</pre><div class="row"><button data-dl="${i.id}">Download full report (JSON)</button></div>`;
+}
+
+document.addEventListener('click', async (e) => {
+  const dl = e.target.closest('[data-dl]'); if (dl) { const d = await api('/api/issues/' + dl.dataset.dl); const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })), download: `issue-${dl.dataset.dl.slice(0, 8)}.json` }); a.click(); return; }
+  if (e.target.closest('select')) return;
+  const ri = e.target.closest('[data-issue]'); if (ri) { const id = ri.dataset.issue; if (open.has('i' + id)) open.delete('i' + id); else { open.add('i' + id); issueDetail[id] = await api('/api/issues/' + id); } render(lastOverview); return; }
+  const rr = e.target.closest('[data-rec]'); if (rr) { const id = 'r' + rr.dataset.rec; open.has(id) ? open.delete(id) : open.add(id); render(lastOverview); }
+});
+document.addEventListener('change', async (e) => { const s = e.target.closest('[data-status]'); if (s) { await api('/api/issues/' + s.dataset.status, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: s.value }) }); } });
+$('users').oninput = () => { usersDirty = true; };
+$('saveusers').onclick = async () => { try { const users = JSON.parse($('users').value); await api('/api/admin/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ users }) }); usersDirty = false; $('usermsg').textContent = 'Saved.'; } catch (e) { $('usermsg').textContent = 'Not saved: ' + e.message; } };
+$('orgs').oninput = () => { orgsDirty = true; };
+$('saveorgs').onclick = async () => { try { const orgs = JSON.parse($('orgs').value); await api('/api/admin/orgs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orgs }) }); orgsDirty = false; $('orgmsg').textContent = 'Saved — phones pick it up on their next refresh.'; } catch (e) { $('orgmsg').textContent = 'Not saved: ' + e.message; } };
+$('setmin').onclick = async () => { const n = Number($('minv').value); if (n) await api('/api/admin/min-schema', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ n }) }); };
+$('reset').onclick = async () => { if (confirm('Erase ALL server data (records, photos, team surveys, reports)? Phones keep their local copies.')) { await api('/api/admin/reset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); open.clear(); } };
+$('forms').addEventListener('keydown', async (e) => { if (e.key === 'Enter' && e.target.dataset.form) { await api('/api/admin/form-scope', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: e.target.dataset.form, scope: e.target.value.trim() }) }); e.target.blur(); } });
+async function tick() { try { lastOverview = await api('/api/admin/overview'); if (!document.activeElement || document.activeElement.tagName !== 'SELECT') render(lastOverview); } catch { /* server restarting */ } }
+tick(); setInterval(tick, 2000);
+</script>
+</body>
+</html>

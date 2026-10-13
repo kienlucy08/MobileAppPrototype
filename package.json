@@ -1,0 +1,13 @@
+{
+  "type": "module",
+  "name": "field-collect-prototype",
+  "private": true,
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node test/engine.test.mjs && node test/collab.test.mjs && node test/xlsform.test.mjs && node test/consmod.test.mjs && node test/orgs.test.mjs && node test/auth.test.mjs && node test/nearby.test.mjs && node test/library.test.mjs",
+    "sample": "node samples/make-sample.mjs"
+  },
+  "dependencies": {
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field Collect — team demo</title>
+<style>
+  :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --primary:#0f766e; }
+  * { box-sizing: border-box; } body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: #e8ecf0; }
+  header { background: #0b3b39; color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; } header b { font-size: 17px; } header small { opacity: .75; }
+  header .sp { flex: 1; } header a, header button { color: #fff; background: rgba(255,255,255,.14); border: 0; border-radius: 8px; padding: 7px 12px; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+  .wrap { display: flex; gap: 22px; padding: 18px 20px 40px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  .phone { display: flex; flex-direction: column; gap: 8px; width: 390px; }
+  .phone h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; } .dot { width: 10px; height: 10px; border-radius: 50%; background: #16a34a; }
+  .ctl { display: flex; gap: 6px; } .nb { display: flex; align-items: center; gap: 4px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-size: 13px; white-space: nowrap; }
+  .ctl select { flex: 1; padding: 6px; border-radius: 8px; border: 1px solid var(--line); font: inherit; background: #fff; } .ctl button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 10px; font: inherit; cursor: pointer; }
+  .bezel { border: 10px solid #111827; border-radius: 40px; overflow: hidden; background: #fff; box-shadow: 0 24px 60px rgba(15,23,42,.3); height: 780px; }
+  .bezel iframe { width: 100%; height: 100%; border: 0; display: block; }
+  .side { width: 520px; display: flex; flex-direction: column; gap: 12px; } .side .bezel { border-radius: 14px; border-width: 6px; height: 560px; }
+  .card { background: #fff; border-radius: 12px; padding: 14px 16px; } .card h3 { margin: 0 0 6px; font-size: 14px; } .card ol { margin: 0; padding-left: 18px; line-height: 1.55; }
+  @media (max-width: 1500px) { .side { width: 390px; } }
+</style>
+</head>
+<body>
+<header><b>Field Collect</b><small>team demo — several phones, one survey</small><span class="sp"></span>
+  <button id="add">+ Add phone</button><a href="admin.html" target="_blank">Open dev-team view ↗</a><a href="app.html" target="_blank">Open single app ↗</a></header>
+<div class="wrap" id="wrap"></div>
+<script>
+const PEOPLE = [['maria', 'Maria', 'microsoft:maria@demo.test'], ['sam', 'Sam', 'password:sam:demo'], ['priya', 'Priya', 'microsoft:priya@demo.test']];   // demo accounts (Maria + Priya use Microsoft login, Sam a password)
+const PROFILES = { good: 'Good (LTE)', poor: 'Poor (3G)', flaky: 'Flaky', offline: 'No service' };
+const wrap = document.getElementById('wrap'); let n = 0;
+function phone([id, name, signin]) {
+  const col = document.createElement('div'); col.className = 'phone';
+  col.innerHTML = `<h2><span class="dot"></span>${name}'s phone</h2>
+    <div class="ctl"><label class="nb" title="Simulated Bluetooth / Wi-Fi Direct: works with the network off"><input type="checkbox"> Nearby</label><select title="Network for this phone">${Object.entries(PROFILES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button title="Reload the app on this phone">Kill app</button></div>
+    <div class="bezel"><iframe title="${name}'s phone" src="app.html?device=${id}&signin=${encodeURIComponent(signin)}"></iframe></div>`;
+  const sel = col.querySelector('select'), fr = col.querySelector('iframe'), dot = col.querySelector('.dot');
+  const fc = () => fr.contentWindow && fr.contentWindow.__fc;
+  col.querySelector('.nb input').onchange = (e) => { const f = fc(); if (f) (e.target.checked ? f.nearby.enable() : f.nearby.disable()); };
+  try { const saved = JSON.parse(localStorage.getItem(`fc.${id}.profile`)); if (saved) sel.value = saved; } catch {}
+  sel.onchange = () => { const f = fc(); if (!f) return; f.server.setProfile(sel.value); localStorage.setItem(`fc.${id}.profile`, JSON.stringify(sel.value)); f.engine.nudge(); f.collab.nudge(); f.reporter.nudge(); f.engine._log('info', null, `Network set to “${PROFILES[sel.value]}”.`); f.collab._emit(); dot.style.background = sel.value === 'offline' ? '#dc2626' : sel.value === 'good' ? '#16a34a' : '#f59e0b'; };
+  col.querySelector('button').onclick = () => fr.contentWindow.location.reload();
+  wrap.insertBefore(col, wrap.querySelector('.side'));
+  sel.onchange();
+}
+document.getElementById('add').onclick = () => { if (n < PEOPLE.length) phone(PEOPLE[n++]); else alert('Three phones is plenty for the demo.'); };
+const side = document.createElement('div'); side.className = 'side';
+side.innerHTML = `<div class="card"><h3>Try this</h3><ol>
+  <li><b>No signal at all:</b> set both phones to <b>No service</b> and tick <b>Nearby</b> on both. Start a team survey on Maria's phone; Sam's phone offers it under Nearby sync → <b>Join nearby</b>. Edits and photos move directly between them.</li>
+  <li>On <b>Maria's</b> phone: Surveys → <b>Start as team survey</b>. Fill in the first page.</li>
+  <li>On <b>Sam's</b> phone: Surveys → <b>Join</b> that record. Watch Maria's answers appear and the “is editing” tag when you tap a field.</li>
+  <li>Both add <b>guy wires</b> and photos (Dev tab → team demo record works too).</li>
+  <li>Set Sam to <b>No service</b>, keep editing, then restore. Everything merges.</li>
+  <li>Submit from Maria: it waits for Sam's photos to arrive.</li>
+  <li>On any phone: Health → <b>Report a problem</b>; see it land in the dev-team view.</li></ol></div>
+  <div class="bezel"><iframe title="Dev team view" src="admin.html"></iframe></div>`;
+wrap.append(side);
+phone(PEOPLE[n++]); phone(PEOPLE[n++]);
+</script>
+</body>
+</html>
