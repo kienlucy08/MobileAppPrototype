@@ -17,10 +17,10 @@ export class RemoteServer {
   setToken(t) { this.token = t; }
   stats() { return { ...this._stats, acksLost: this.acksLost }; }
 
-  async _fetch(method, url, body, raw) {
+  async _fetch(method, url, body, raw, extra = {}) {
     let res;
     try {
-      res = await fetch(this.base + url, { method, body: raw ? body : body === undefined ? undefined : JSON.stringify(body), headers: { ...(raw ? { 'content-type': 'application/octet-stream' } : body === undefined ? {} : { 'content-type': 'application/json' }), ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) } });
+      res = await fetch(this.base + url, { method, body: raw ? body : body === undefined ? undefined : JSON.stringify(body), headers: { ...(raw ? { 'content-type': 'application/octet-stream' } : body === undefined ? {} : { 'content-type': 'application/json' }), ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), ...extra } });
     } catch { throw new NetError('ERR-NET-002', 'Cannot reach the server'); }
     if (res.status >= 500) throw new NetError('ERR-NET-001', `Server error ${res.status}`);
     const data = await res.json().catch(() => ({}));
@@ -31,12 +31,12 @@ export class RemoteServer {
     }
     return data;
   }
-  _call(bytes, method, url, body, raw) { return withFaults(this, bytes, () => this._fetch(method, url, body, raw)); }
+  _call(bytes, method, url, body, raw, extra) { return withFaults(this, bytes, () => this._fetch(method, url, body, raw, extra)); }
 
   // ---- record upload (used by the Engine) ---------------------------------------------------------
   ping() { return this._call(0, 'GET', '/api/ping'); }
   begin(a) { return this._call(2000 + JSON.stringify(a.answers).length, 'POST', '/api/begin', a); }
-  putMedia({ id, mediaId, size, blob }) { return this._call(size, 'PUT', `/api/media/${id}/${mediaId}`, blob, true); }
+  putMedia({ id, mediaId, size, blob }) { return this._call(size, 'PUT', `/api/media/${id}/${mediaId}`, blob, true, { 'x-photo-size': String(size) }); }
   commit(a) { return this._call(500, 'POST', '/api/commit', a); }
 
   // ---- shared records ---------------------------------------------------------------------------
@@ -48,6 +48,10 @@ export class RemoteServer {
     const q = new URLSearchParams({ since, d: deviceId, n: name || '', f: focus || '', p: pending });
     return this._call(1500, 'GET', `/api/shared/${id}/ops?${q}`);
   }
+  assign(id, a) { return this._call(500, 'POST', `/api/shared/${id}/assign`, a); }
+  team() { return this._call(800, 'GET', '/api/team'); }
+  notifications() { return this._call(800, 'GET', '/api/notifications'); }
+  readNotifications() { return this._call(300, 'POST', '/api/notifications/read', {}); }
   submitShared(id, a) { return this._call(500, 'POST', `/api/shared/${id}/submit`, a); }
 
   organizations() { return this._call(800, 'GET', '/api/identity/organizations'); }

@@ -7,7 +7,7 @@
 //  * Photos stay on the phone that took them and upload in the background as they are taken (via the Engine);
 //    the record can be submitted once every teammate's photos have reached the server.
 
-import { applyOp, materialize, diff, newState, newId, entryOf, stateToOps } from './crdt.js';
+import { applyOp, materialize, diff, newState, newId, entryOf, stateToOps, attribution } from './crdt.js';
 import { NetError } from './errors.js';
 
 const POLL_MS = 1200;
@@ -62,6 +62,17 @@ export class Collab extends EventTarget {
     this.nudge(); this._emit();
     return doc;
   }
+
+  /** Share / reassign a team record (leads, PMs). Returns the new assignee list. */
+  async assign(id, change) {
+    const doc = this.docs.get(id);
+    if (!doc?.created) throw new NetError('ERR-NET-002', 'This record has not reached the server yet — it will in a moment.');
+    const r = await this.server.assign(id, change);
+    doc.assignees = r.assignees; this._listAt = 0; this.nudge(); this._emit();
+    return r;
+  }
+  /** Rows of "who captured what" for a record. */
+  contributors(id) { const d = this.docs.get(id); return d ? attribution(d.survey, d.state) : []; }
 
   answersOf(id) { const d = this.docs.get(id); return d ? materialize(d.survey, d.state) : {}; }
 
@@ -122,7 +133,12 @@ export class Collab extends EventTarget {
           await this._sync(doc);
         }
         this._fails = 0;
-        if (Date.now() - this._listAt > 4000) { this.list = await this.server.listShared(); this._listAt = Date.now(); this._emit(); }
+        if (Date.now() - this._listAt > 4000) {
+          this.list = await this.server.listShared(); this._listAt = Date.now();
+          for (const m of this.list) { const d = this.docs.get(m.id); if (d) d.assignees = m.assignees; }
+          for (const d of this.docs.values()) if (d.created) d.assigned = this.list.some((m) => m.id === d.id);   // reassigned away: leaves this phone's list once it has synced
+          this._emit();
+        }
         if (Date.now() - this._formsAt > 8000) { this.forms = await this.server.listForms(); this._formsAt = Date.now(); this._emit(); }
       } catch (e) {
         if (e instanceof NetError) {

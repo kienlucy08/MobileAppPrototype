@@ -36,7 +36,7 @@ export const HELPERS = {
   startsWith: (a, b) => String(a ?? '').startsWith(String(b ?? '')),
   endsWith: (a, b) => String(a ?? '').endsWith(String(b ?? '')),
   sum: (x) => (Array.isArray(x) ? x : [x]).reduce((a, b) => a + (Number(b) || 0), 0),
-  max: Math.max, min: Math.min,
+  max: Math.max, min: Math.min, sqrt: Math.sqrt, abs: Math.abs, pow: Math.pow, atan: Math.atan, atan2: Math.atan2, sin: Math.sin, cos: Math.cos, pi: () => Math.PI,
   countselected: (x) => (Array.isArray(x) ? x.length : x == null || x === '' ? 0 : String(x).trim().split(/\s+/).length),
   choicename: (val, name) => { const c = (CTX.choices[name] || []).find((x) => String(x.value) === String(val)); return c ? c.label : val == null ? '' : val; },
   formatdate: (d, fmt = '%Y-%m-%d') => {

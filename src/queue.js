@@ -80,6 +80,14 @@ export class Engine extends EventTarget {
     this._log('info', null, 'Manual retry requested.', subId);
     this.nudge(); this._loop();
   }
+  /** "Go to the problem": take a failed record back to draft so it can be edited. Photos already delivered stay delivered;
+   *  the ones that failed are flagged (lastError) until replaced or removed. */
+  async reopen(subId) {
+    const sub = this.subs.get(subId); if (!sub) return;
+    for (const m of this.mediaFor(subId)) if (m.state === 'failed') { m.lastError = m.errorCode; m.state = 'local'; m.attempts = 0; m.nextAttemptAt = 0; m.errorCode = null; await this._saveMedia(m); }
+    sub.status = 'draft'; sub.began = false; sub.error = null; sub.reopened = true; await this._saveSub(sub);
+    this._log('info', null, 'Record reopened for editing after a failed send.', subId); this._emit();
+  }
   pause() { this.userPaused = true; this._log('info', null, 'Uploads paused by user.'); this._emit(); }
   resume() { this.userPaused = false; this._log('info', null, 'Uploads resumed.'); this._wake.splice(0).forEach((f) => f()); this._emit(); this._loop(); }
   nudge() { this._nudges.splice(0).forEach((f) => f()); }

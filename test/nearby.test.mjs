@@ -93,7 +93,7 @@ await test('Sam also relays everything Maria did offline: the server ends up wit
 await test('Maria\'s own phone catches up when she later gets signal: duplicates are ignored, one record', async () => {
   maria.srv.setProfile('good'); maria.collab.nudge(); maria.engine.nudge(); maria.engine.kick();
   await until(() => maria.collab.unsynced() === 0, 20000);
-  const r = await sam.collab.submit(doc.id, { force: true });
+  const r = await maria.collab.submit(doc.id, { force: true });          // only a crew lead can submit
   assert.ok(r.recordId >= 1001);
   assert.equal(core.state.subs[doc.id].answers.guyWires.length, 2);
   assert.equal(Object.keys(core.state.subs[doc.id].received).length, 5, 'each photo stored once');

@@ -63,6 +63,12 @@ async function encode(bmp, W, H) {
   return best;
 }
 
+async function encodeFull(bmp) {
+  const cv = makeCanvas(bmp.width, bmp.height), g = cv.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, bmp.width, bmp.height); g.drawImage(bmp, 0, 0);
+  return { blob: await toBlob(cv, 0.95), w: bmp.width, h: bmp.height };
+}
+
 async function thumbOf(bmp) {
   const s = LIMITS.thumb, r = Math.max(s / bmp.width, s / bmp.height);
   const cv = makeCanvas(s, s), g = cv.getContext('2d');
@@ -70,7 +76,7 @@ async function thumbOf(bmp) {
   return toDataURL(await toBlob(cv, 0.6));
 }
 
-export async function processImage(file) {
+export async function processImage(file, { original = false } = {}) {
   const exif = await readExif(file);
   let bmp;
   try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
@@ -79,8 +85,11 @@ export async function processImage(file) {
     catch { throw new AppError('ERR-IMG-002', `${file.name || 'image'} could not be decoded (${file.type || 'unknown type'}).`); }
   }
   const thumb = await thumbOf(bmp);
-  const isSmallJpeg = /jpe?g/i.test(file.type) && file.size <= LIMITS.targetBytes && Math.max(bmp.width, bmp.height) <= LIMITS.maxDim;
-  const out = isSmallJpeg ? { blob: file, w: bmp.width, h: bmp.height } : await encode(bmp, bmp.width, bmp.height);
+  const isJpeg = /jpe?g/i.test(file.type);
+  const isSmallJpeg = isJpeg && file.size <= LIMITS.targetBytes && Math.max(bmp.width, bmp.height) <= LIMITS.maxDim;
+  // Original quality: a JPEG goes up exactly as the camera wrote it (EXIF and all). Only formats the server cannot use are converted, at high quality.
+  const out = isSmallJpeg || (original && isJpeg) ? { blob: file, w: bmp.width, h: bmp.height }
+    : original ? await encodeFull(bmp) : await encode(bmp, bmp.width, bmp.height);
   bmp.close?.();
   return {
     ...out, thumb,
@@ -96,7 +105,7 @@ export async function processImage(file) {
  * Compress + persist images for one image field. `items` are Files or lazy () => File factories
  * (so 400 generated originals never sit in memory at once). Failures are returned, never swallowed.
  */
-export async function addImages(engine, sub, fieldPath, items, { onProgress, concurrency = 2 } = {}) {
+export async function addImages(engine, sub, fieldPath, items, { onProgress, concurrency = 2, original = false } = {}) {
   const est = await navigator.storage?.estimate?.().catch(() => null);
   if (est && est.quota - est.usage < 50 * 1024 * 1024) throw new AppError('ERR-STO-001', 'Less than 50 MB of storage remaining.');
 
@@ -106,7 +115,7 @@ export async function addImages(engine, sub, fieldPath, items, { onProgress, con
     for (let i = next++; i < items.length; i = next++) {
       const file = typeof items[i] === 'function' ? await items[i]() : items[i];
       try {
-        const p = await processImage(file);
+        const p = await processImage(file, { original });
         const rec = {
           id: uid(), subId: sub.id, fieldPath, name: file.name || `photo-${i + 1}.jpg`, state: sub.shared ? 'queued' : 'local',
           size: p.blob.size, origSize: file.size, w: p.w, h: p.h, thumb: p.thumb, meta: p.meta,

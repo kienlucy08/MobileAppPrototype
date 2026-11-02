@@ -61,7 +61,7 @@ export function createServer({ dataDir = path.join(here, 'data'), root = path.jo
         if (!core.state.subs[rec]) throw new AppError('ERR-SYNC-002', 'No handshake for this record');
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file + '.tmp', buf); fs.renameSync(file + '.tmp', file);
-        return send(res, 200, core.putMedia({ id: rec, mediaId: id, size: buf.length }));
+        return send(res, 200, core.putMedia({ id: rec, mediaId: id, size: Math.max(buf.length, Number(req.headers['x-photo-size']) || 0) }));   // the phone declares its size; the larger of the two is checked
       }
       if (m === 'GET') return fs.existsSync(file) ? send(res, 200, fs.readFileSync(file), 'image/jpeg') : send(res, 404, { error: { code: 'ERR-GEN-000', detail: 'No such photo' } });
     }
@@ -75,10 +75,14 @@ export function createServer({ dataDir = path.join(here, 'data'), root = path.jo
     if (m === 'POST' && p === '/api/admin/reset') { core.state = freshState(); fs.rmSync(path.join(dataDir, 'media'), { recursive: true, force: true }); fs.mkdirSync(path.join(dataDir, 'media'), { recursive: true }); save(); return send(res, 200, { ok: true }); }
     if (m === 'GET' && p === '/api/admin/overview') return send(res, 200, core.overview());
 
-    if (m === 'GET' && p === '/api/shared') return send(res, 200, core.listShared());
+    if (m === 'GET' && p === '/api/team') return send(res, 200, core.teammates(user));
+    if (m === 'GET' && p === '/api/notifications') return send(res, 200, core.notificationsFor(user));
+    if (m === 'POST' && p === '/api/notifications/read') return send(res, 200, core.readNotifications(user));
+    if (m === 'GET' && p === '/api/shared') return send(res, 200, core.listShared(user));
     if (m === 'POST' && p === '/api/shared') return send(res, 200, core.createShared({ ...(await json(req)), user: who }));
-    if ((g = p.match(/^\/api\/shared\/([^/]+)(\/(ops|submit))?$/))) {
+    if ((g = p.match(/^\/api\/shared\/([^/]+)(\/(ops|submit|assign))?$/))) {
       const id = g[1], what = g[3];
+      if (what === 'assign' && m === 'POST') return send(res, 200, core.assign(id, await json(req), user));
       if (!what && m === 'GET') return send(res, 200, core.getShared(id));
       if (what === 'ops' && m === 'GET') return send(res, 200, core.pullOps(id, { since: Number(url.searchParams.get('since') || 0), deviceId: url.searchParams.get('d'), name: url.searchParams.get('n'), focus: url.searchParams.get('f') || null, pending: Number(url.searchParams.get('p') || 0) }));
       if (what === 'ops' && m === 'POST') return send(res, 200, core.pushOps(id, await json(req)));
@@ -106,7 +110,7 @@ export function createServer({ dataDir = path.join(here, 'data'), root = path.jo
       if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else serveStatic(req, res, url);
     } catch (e) {
-      if (e instanceof AppError) send(res, /^ERR-AUTH-00[123]/.test(e.code) ? 401 : 422, { error: { code: e.code, detail: e.message, data: e.data } });
+      if (e instanceof AppError) send(res, /^ERR-AUTH-00[123]/.test(e.code) ? 401 : e.code === 'ERR-AUTH-004' ? 403 : 422, { error: { code: e.code, detail: e.message, data: e.data } });
       else { console.error(e); send(res, 500, { error: { code: 'ERR-GEN-000', detail: e.message } }); }
     }
   });

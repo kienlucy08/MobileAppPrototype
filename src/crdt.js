@@ -18,12 +18,12 @@ export function applyOp(s, op) {
   switch (op.k) {
     case 'set': {
       const cur = s.fields[op.p];
-      if (!cur || newer(op, cur)) s.fields[op.p] = { v: op.v, t: op.t, by: op.by };
+      if (!cur || newer(op, cur)) s.fields[op.p] = { v: op.v, t: op.t, by: op.by, n: op.n };
       break;
     }
     case 'item+': case 'item-': {
       const m = (s.items[op.p] ||= {}), cur = m[op.id];
-      if (!cur || newer(op, cur)) m[op.id] = { t: op.t, by: op.by, del: op.k === 'item-', c: Math.min(cur?.c ?? op.c ?? op.t, op.c ?? op.t) };
+      if (!cur || newer(op, cur)) m[op.id] = { t: op.t, by: op.by, n: op.n || cur?.n, del: op.k === 'item-', c: Math.min(cur?.c ?? op.c ?? op.t, op.c ?? op.t) };
       else if ((op.c ?? op.t) < cur.c) cur.c = op.c ?? op.t;
       break;
     }
@@ -43,8 +43,8 @@ export const entryOf = (s, op) => (op.k === 'set' ? s.fields[op.p] : op.k.starts
  *  whichever of them relays the change first. */
 export function stateToOps(s) {
   const ops = [];
-  for (const [p, e] of Object.entries(s.fields)) ops.push({ k: 'set', p, v: e.v, t: e.t, by: e.by, opId: `st:set:${p}:${e.t}:${e.by}` });
-  for (const [p, m] of Object.entries(s.items)) for (const [id, e] of Object.entries(m)) ops.push({ k: e.del ? 'item-' : 'item+', p, id, t: e.t, by: e.by, c: e.c, opId: `st:item:${p}:${id}:${e.t}:${e.by}:${e.del ? 1 : 0}` });
+  for (const [p, e] of Object.entries(s.fields)) ops.push({ k: 'set', p, v: e.v, t: e.t, by: e.by, n: e.n, opId: `st:set:${p}:${e.t}:${e.by}` });
+  for (const [p, m] of Object.entries(s.items)) for (const [id, e] of Object.entries(m)) ops.push({ k: e.del ? 'item-' : 'item+', p, id, t: e.t, by: e.by, n: e.n, c: e.c, opId: `st:item:${p}:${id}:${e.t}:${e.by}:${e.del ? 1 : 0}` });
   for (const [p, m] of Object.entries(s.photos)) for (const [id, e] of Object.entries(m)) ops.push({ k: e.del ? 'photo-' : 'photo+', p, id, m: e.m, n: e.n, t: e.t, by: e.by, c: e.c, opId: `st:photo:${p}:${id}:${e.t}:${e.by}:${e.del ? 1 : 0}` });
   return ops;
 }
@@ -107,4 +107,17 @@ export function livePhotos(st) {
   const out = [];
   for (const [key, m] of Object.entries(st.photos)) for (const [id, e] of Object.entries(m)) if (!e.del) out.push({ key, id, by: e.by, n: e.n, m: e.m });
   return out;
+}
+
+/** Who captured what: [{who, answers, entries, photos}] — every answer, repeat entry and photo is credited to the person
+ *  (by name) whose phone made it. Calculated values are the app's, not a person's, so they are not counted. */
+export function attribution(survey, st) {
+  const calc = new Set();
+  const walk = (fs) => { for (const f of fs) { if (f.type === 'calculate') calc.add(f.name); if (f.fields) walk(f.fields); } };
+  survey.pages.forEach((p) => walk(p.fields));
+  const rows = new Map(), row = (e) => { const k = e.n || e.by; if (!rows.has(k)) rows.set(k, { who: k, answers: 0, entries: 0, photos: 0 }); return rows.get(k); };
+  for (const [p, e] of Object.entries(st.fields)) if (e.v !== null && e.v !== '' && !calc.has(p.split('/').pop())) row(e).answers++;
+  for (const m of Object.values(st.items)) for (const e of Object.values(m)) if (!e.del) row(e).entries++;
+  for (const m of Object.values(st.photos)) for (const e of Object.values(m)) if (!e.del) row(e).photos++;
+  return [...rows.values()].sort((a, b) => b.photos + b.answers - (a.photos + a.answers));
 }

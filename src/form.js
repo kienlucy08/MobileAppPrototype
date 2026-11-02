@@ -2,9 +2,12 @@ import { h, fmtBytes, debounce, htmlFragment, stripHtml } from './util.js';
 import { setChoices, CTX } from './expr.js';
 import * as S from './schema.js';
 import { addImages } from './images.js';
+import { openCamera } from './capture.js';
+import { attribution } from './crdt.js';
 import { describe } from './errors.js';
 import { icon } from './icons.js';
 import { newId } from './crdt.js';
+import { ROLES } from './serverCore.js';
 
 const surveyOf = (ctx, sub) => (sub.shared ? ctx.collab.docs.get(sub.id)?.survey : sub.survey) || ctx.survey;
 const hasVisible = (pg) => pg.fields.some((f) => f.type !== 'calculate' && f.appearance !== 'hidden');
@@ -16,6 +19,30 @@ const interp = (text, item, root) => String(text ?? '').replace(/\$\{([\w.]+)\}/
   return CTX.choices[n]?.find((c) => String(c.value) === String(raw))?.label ?? raw;
 });
 const initials = (n = '?') => String(n).trim().slice(0, 1).toUpperCase();
+
+const ROLE_SHORT = { member: 'crew', lead: 'lead', pm: 'PM' };
+export const contributorsTable = (rows) => h('table', { class: 'contrib' }, h('tr', {}, ['Person', 'Answers', 'Entries', 'Photos'].map((t) => h('th', {}, t))),
+  ...rows.map((r) => h('tr', {}, h('td', {}, r.who), h('td', {}, r.answers), h('td', {}, r.entries), h('td', {}, r.photos))));
+
+/** Share / reassign a team record: leads and PMs add or remove people. Removed people keep their entries, credited to them. */
+async function shareSheet(ctx, sub) {
+  const doc = ctx.collab.docs.get(sub.id);
+  const box = h('div', { class: 'people-list' }, h('p', { class: 'muted' }, 'Loading…'));
+  const close = ctx.modal('People on this survey', box, h('div', { class: 'row end' }, h('button', { type: 'button', class: 'btn primary', onclick: () => close() }, 'Done')));
+  let team = [];
+  const draw = () => {
+    const mine = new Map((doc.assignees || []).map((a) => [a.email, a]));
+    const rows = [...mine.values(), ...team.filter((t) => !mine.has(t.email))];
+    box.replaceChildren(h('p', { class: 'muted' }, 'Reassigning moves the survey to someone else. It leaves the previous person’s list once their phone syncs; what they entered stays on the record, credited to them.'),
+      ...rows.map((p) => h('div', { class: 'row-card inner' }, h('div', { class: 'grow' }, h('b', {}, p.email === ctx.device.email ? `${p.name} (you)` : p.name), h('small', { class: 'muted block' }, ROLES[p.role] || p.role)),
+        h('button', { type: 'button', class: 'btn small' + (mine.has(p.email) ? '' : ' primary'), onclick: async (e) => {
+          e.target.disabled = true;
+          try { await ctx.collab.assign(sub.id, mine.has(p.email) ? { remove: [p.email] } : { add: [p.email] }); } catch (err) { ctx.toast(`${err.code || 'ERR-GEN-000'}: ${err.message}`, 5000); }
+          draw();
+        } }, mine.has(p.email) ? 'Remove' : 'Add'))));
+  };
+  try { team = await ctx.server.team(); draw(); } catch (e) { box.replaceChildren(h('p', { class: 'muted' }, e.code === 'ERR-NET-002' || e.code === 'ERR-NET-001' ? 'You need a signal to change who is on a survey.' : `${e.code}: ${e.message}`)); }
+}
 
 /** Who is on the record, what they have uploaded, and whether this phone has changes still waiting to sync. */
 export function teamPanel(ctx, sub) {
@@ -34,6 +61,15 @@ export function teamPanel(ctx, sub) {
         const near = ctx.nearby.peersWith(sub.id), mine = ctx.engine.mediaFor(sub.id).filter((m) => m.state !== 'done' && !m.relayed).length;
         return h('div', { class: 'nearbyline' }, icon('wifi', 15), near.length ? `Nearby: ${near.map((p) => p.name).join(', ')} — edits sync directly` : 'Nearby sync on — nobody in range',
           near.length && mine ? h('button', { class: 'btn small', onclick: async (e) => { e.target.disabled = true; const n = await ctx.nearby.sharePhotos(sub.id); ctx.toast(`Handed ${n} photo${n === 1 ? '' : 's'} to nearby phones — whoever gets signal first uploads them.`, 5000); e.target.disabled = false; } }, `Share ${mine} photo${mine === 1 ? '' : 's'}`) : null);
+      })() : null,
+      ctx.has('assign') ? (() => {
+        const people = doc.assignees || [];
+        return h('div', { class: 'peopleline' }, icon('user', 15), h('span', { class: 'grow' }, people.length ? people.map((a) => `${a.email === ctx.device.email ? 'You' : a.name}${ctx.has('roles') ? ` (${ROLE_SHORT[a.role] || a.role})` : ''}`).join(', ') : 'Just you so far'),
+          ctx.can('share') ? h('button', { type: 'button', class: 'btn small', onclick: () => shareSheet(ctx, sub) }, 'People') : null);
+      })() : null,
+      ctx.has('attribution') ? (() => {
+        const rows = ctx.collab.contributors(sub.id);
+        return rows.length ? h('details', { class: 'whoby' }, h('summary', {}, 'Who captured what'), contributorsTable(rows)) : null;
       })() : null,
       prog.length ? h('div', { class: 'photoprog' }, prog.map((r) => h('div', { class: 'pp' },
         h('span', {}, r.mine ? 'Your photos' : `${r.who}'s photos`), h('div', { class: 'bar' }, h('i', { style: `width:${r.total ? (r.received / r.total) * 100 : 0}%` })), h('small', {}, `${r.received}/${r.total}`)))) : null].filter(Boolean));
@@ -69,7 +105,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
   const root = h('div', { class: 'screen form' },
     h('header', { class: 'appbar' }, h('button', { class: 'iconbtn', 'aria-label': 'Save and exit', onclick: () => { saveNow(); onExit(); } }, icon('back')), title,
       shared ? h('span', { class: 'saved teamtag' }, icon('upload', 13), 'Team') : h('span', { class: 'saved' }, 'Draft saved')),
-    bar, team ? team.el : null, body,
+    bar, ctx.has('photofirst') && ctx.openPhotoFirst ? h('div', { class: 'form-tools' }, h('button', { type: 'button', class: 'btn small ghost', onclick: () => { saveNow(); ctx.openPhotoFirst(sub); } }, icon('image', 15), 'Photo-first: shoot now, sort later')) : null, team ? team.el : null, body,
     h('footer', { class: 'formnav' }, back, dots, next));
   root.cleanup = () => { cleanups.forEach((f) => f()); };
 
@@ -322,7 +358,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
 
     const info = (id) => {
       const r = ctx.engine.media.get(id), remote = shared?.remotePhoto(sub.id, id);
-      if (r) return { thumb: r.thumb, name: r.name, size: r.size, state: r.state, mine: !r.relayed, by: r.relayedFrom, noMeta: r.meta?.noLocation || r.meta?.noTimestamp };
+      if (r) return { thumb: r.thumb, name: r.name, size: r.size, state: r.state, mine: !r.relayed, by: r.relayedFrom, noMeta: r.meta?.noLocation || r.meta?.noTimestamp, err: r.state !== 'done' ? r.lastError : null };
       if (remote) return { thumb: remote.thumb, name: remote.name, size: remote.size, state: remote.received ? 'done' : 'queued', mine: false, by: remote.byName, noMeta: remote.meta?.noLocation };
       return null;
     };
@@ -336,7 +372,8 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
       const recs = ids.map((id) => ({ id, ...info(id) })).filter((r) => r.thumb || r.name);
       const cap = showAll ? recs.length : 48;
       grid.replaceChildren(...[
-        ...recs.slice(0, cap).map((r) => h('div', { class: `thumb st-${r.state}${r.noMeta ? ' nometa' : ''}${r.mine ? '' : ' theirs'}`, title: `${r.name} · ${fmtBytes(r.size || 0)}${r.by ? ` · by ${r.by}` : ''}` },
+        ...recs.slice(0, cap).map((r) => h('div', { class: `thumb st-${r.state}${r.noMeta ? ' nometa' : ''}${r.mine ? '' : ' theirs'}${r.err ? ' flagged' : ''}`, title: `${r.name} · ${fmtBytes(r.size || 0)}${r.by ? ` · by ${r.by}` : ''}${r.err ? ` · failed to send: ${r.err}` : ''}` },
+          r.err ? h('button', { type: 'button', class: 'replace', onclick: async () => { ids.splice(ids.indexOf(r.id), 1); await ctx.engine.removeMedia(r.id); set(ids); draw(); openCam(); } }, `${r.err} · Replace`) : null,
           h('img', { src: r.thumb, alt: r.name, loading: 'lazy' }),
           r.mine ? null : h('span', { class: 'by' }, initials(r.by)),
           h('button', { type: 'button', class: 'rm', 'aria-label': `Remove ${r.name}`, onclick: async () => { ids.splice(ids.indexOf(r.id), 1); if (r.mine) await ctx.engine.removeMedia(r.id); set(ids); draw(); } }, '×'))),
@@ -347,7 +384,9 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     if (shared) { ctx.collab.addEventListener('change', draw); cleanups.push(() => ctx.collab.removeEventListener('change', draw)); }
     ctx.engine.addEventListener('change', draw); cleanups.push(() => ctx.engine.removeEventListener('change', draw));
 
-    const ingest = async (files) => {
+    let chain = Promise.resolve();
+    const ingest = (files) => (chain = chain.then(() => ingestNow(files)));          // rapid-fire shots are processed one batch at a time
+    const ingestNow = async (files) => {
       files = [...files]; if (!files.length) return;
       if (f.maxFiles === 1 && ids.length) { for (const id of ids.splice(0)) await ctx.engine.removeMedia(id); files = files.slice(0, 1); }
       const room = f.maxFiles == null ? files.length : Math.max(0, f.maxFiles - ids.length);
@@ -355,6 +394,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
       prog.hidden = false;
       try {
         const r = await addImages(ctx.engine, sub, path, files, {
+          original: ctx.settings?.original,
           onProgress: (p) => prog.replaceChildren(h('div', { class: 'bar' }, h('i', { style: `width:${(p.done / p.total) * 100}%` })),
             h('small', {}, `Optimising ${p.done}/${p.total} · ${fmtBytes(p.origBytes)} → ${fmtBytes(p.bytes)}`)),
         });
@@ -377,9 +417,10 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
 
     const cam = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: (e) => { ingest(e.target.files); e.target.value = ''; } });
     const gal = h('input', { type: 'file', accept: 'image/*', multiple: f.maxFiles !== 1, hidden: true, onchange: (e) => { ingest(e.target.files); e.target.value = ''; } });
+    const openCam = () => (ctx.has('camera') ? openCamera({ container: document.querySelector('.device') || document.body, defaultZoom: f.defaultZoom ?? 1, title: f.label || 'Camera', onShot: (file) => ingest([file]), fallbackInput: cam }) : cam.click());
     const mode = f.appearance || 'both';
     const buttons = h('div', { class: 'row' },
-      mode !== 'gallery' ? h('button', { type: 'button', class: 'btn small primary', onclick: () => cam.click() }, icon('camera'), 'Camera') : null,
+      mode !== 'gallery' ? h('button', { type: 'button', class: 'btn small primary', onclick: openCam }, icon('camera'), 'Camera') : null,
       mode !== 'camera' ? h('button', { type: 'button', class: 'btn small', onclick: () => gal.click() }, icon('image'), 'Gallery / files') : null);
     draw();
     return h('div', { class: 'imagefield' }, counter, buttons, cam, gal, prog, notes, grid);
@@ -508,7 +549,7 @@ export function renderReview(ctx, sub, { onEdit, onBack, onSent }) {
         onSent();
       }
     } catch (e) {
-      send.disabled = false; send.textContent = shared ? 'Submit team record' : 'Save & send';
+      send.disabled = issues.length > 0 || unsorted > 0 || !allowed; send.textContent = sendLabel();
       const code = e.code || 'ERR-GEN-000', d = describe(code);
       result.replaceChildren(h('div', { class: 'issue' },
         h('div', { class: 'issue-top' }, h('code', { class: 'chip err' }, code), h('b', {}, d.title)),
@@ -518,8 +559,12 @@ export function renderReview(ctx, sub, { onEdit, onBack, onSent }) {
         e.code?.startsWith('ERR-NET') ? h('p', { class: 'muted' }, 'Your changes are safe on this phone and will sync when service returns. Submit once you are back in signal.') : null));
     }
   }
-  const send = h('button', { class: 'btn primary big', disabled: issues.length > 0, onclick: () => submit(false) },
-    issues.length ? `Fix ${issues.length} issue${issues.length === 1 ? '' : 's'} to send` : shared ? 'Submit team record' : 'Save & send');
+  const unsorted = (sub.inbox || []).length;
+  const sendLabel = () => (issues.length ? `Fix ${issues.length} issue${issues.length === 1 ? '' : 's'} to send` : unsorted ? `Sort ${unsorted} photo${unsorted === 1 ? '' : 's'} to send` : !allowed ? 'Only a crew lead can submit' : shared ? 'Submit team record' : 'Save & send');
+  const allowed = !shared || ctx.can('submit');
+  const send = h('button', { class: 'btn primary big', disabled: issues.length > 0 || unsorted > 0 || !allowed, onclick: () => submit(false) },
+    sendLabel());
+  const contrib = shared && ctx.has('attribution') ? ctx.collab.contributors(sub.id) : [];
 
   const root = h('div', { class: 'screen' },
     h('header', { class: 'appbar' }, h('button', { class: 'iconbtn', onclick: onBack, 'aria-label': 'Back to form' }, icon('back')), h('div', { class: 'ab-title' }, h('b', {}, 'Review & send'), h('small', {}, S.instanceLabel(survey, answers) || answers.siteId || answers.site_id || sub.label || 'Untitled'))),
@@ -527,12 +572,15 @@ export function renderReview(ctx, sub, { onEdit, onBack, onSent }) {
       team ? team.el : null,
       h('div', { class: 'stats' }, stat(media.length, 'photos'), stat(fmtBytes(bytes), shared ? 'on team record' : 'to upload'), stat(orig > 0 && !shared ? `${Math.round((1 - bytes / orig) * 100)}%` : '—', shared ? '' : `saved (was ${fmtBytes(orig)})`)),
       noMeta ? h('div', { class: 'flag' }, icon('info'), `${noMeta} photo(s) have no GPS metadata. They will be sent and flagged.`) : null,
+      unsorted ? h('div', { class: 'flag' }, icon('alert'), `${unsorted} photo${unsorted === 1 ? ' is' : 's are'} still unsorted (photo-first) and would not be sent.`, h('button', { type: 'button', class: 'btn small primary', onclick: () => ctx.openPhotoFirst(sub) }, 'Sort now')) : null,
+      !allowed ? h('div', { class: 'flag' }, icon('info'), `You are signed in as ${ROLES[ctx.role()]}. Crew members add photos and data; the crew lead submits.`, h('button', { type: 'button', class: 'btn small ghost', onclick: () => submit(false) }, 'Demo: try anyway')) : null,
+      contrib.length ? h('section', {}, h('h3', {}, 'Who captured what'), contributorsTable(contrib)) : null,
       issues.length
         ? h('section', {}, h('h3', {}, `${issues.length} thing${issues.length === 1 ? '' : 's'} to fix before sending`), issues.map(issueCard))
         : h('div', { class: 'ok-card' }, icon('check'), h('div', {}, h('b', {}, 'Ready to send'), h('p', {}, shared
           ? 'Everyone’s answers are merged. Photos upload from each phone; the record is accepted once all of them have arrived.'
           : 'Answers and photos are written to this device first, then uploaded in the background. It’s safe to lose signal, switch apps or close this one.'))),
-      send, result));
+      allowed ? send : h('div', {}, send), result));
   root.cleanup = () => team?.el.cleanup?.();
   return root;
 }

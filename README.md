@@ -13,7 +13,7 @@ npm start              # starts the server and prints the URLs below
 
 | URL | What |
 |---|---|
-| `http://localhost:8123/` | **Team demo**: several phones side by side + the dev-team view. Per-phone network switch and "kill app". |
+| `http://localhost:8123/` | **Prototype by phase**: one tab per build phase (Phase 1 reliability, Phase 2 team-ready, Later), each with its own phones, a feature checklist and a "try this" script. Per-phone network switch and "kill app". |
 | `http://localhost:8123/app.html` | The app itself — open this on a real phone (same Wi-Fi) using the LAN address `npm start` prints. |
 | `http://localhost:8123/admin.html` | Dev-team console: problem reports with logs, records and photos, team surveys, stats. |
 
@@ -56,7 +56,7 @@ On `/`, set two phones to **No service**, tick **Nearby** on both, start a team 
 ## Tests
 
 ```bash
-npm test      # 53 tests: upload engine, collaboration against the real HTTP server, XLSForm import, the CONS-MOD form, the survey library
+npm test      # 60 tests: upload engine, collaboration against the real HTTP server, XLSForm import, the CONS-MOD form, the survey library
 ```
 
 They cover 400 photos delivered exactly once; flaky networks (28% dropped requests, 12% lost replies); service lost and restored mid-batch;

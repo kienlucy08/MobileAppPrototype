@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server/server.js",
-    "test": "node test/engine.test.mjs && node test/collab.test.mjs && node test/xlsform.test.mjs && node test/consmod.test.mjs && node test/orgs.test.mjs && node test/auth.test.mjs && node test/nearby.test.mjs && node test/library.test.mjs",
+    "test": "node test/engine.test.mjs && node test/collab.test.mjs && node test/xlsform.test.mjs && node test/consmod.test.mjs && node test/orgs.test.mjs && node test/auth.test.mjs && node test/nearby.test.mjs && node test/library.test.mjs && node test/team.test.mjs",
     "sample": "node samples/make-sample.mjs"
   },
   "dependencies": {

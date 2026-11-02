@@ -2,13 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Field Collect — team demo</title>
+<title>FieldSync Collect — prototype by phase</title>
 <style>
-  :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --primary:#0f766e; }
-  * { box-sizing: border-box; } body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: #e8ecf0; }
-  header { background: #0b3b39; color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; } header b { font-size: 17px; } header small { opacity: .75; }
-  header .sp { flex: 1; } header a, header button { color: #fff; background: rgba(255,255,255,.14); border: 0; border-radius: 8px; padding: 7px 12px; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
-  .wrap { display: flex; gap: 22px; padding: 18px 20px 40px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --green:#1f7a3d; --dark:#12281d; --light:#8fdc7a; }
+  * { box-sizing: border-box; } body { margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: #eef1ee; }
+  header { background: var(--dark); color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header b { font-size: 17px; } header small { opacity: .7; } header .sp { flex: 1; }
+  header a, header button { color: #fff; background: rgba(255,255,255,.14); border: 0; border-radius: 8px; padding: 7px 12px; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+  nav.tabs { background: var(--dark); display: flex; gap: 4px; padding: 0 20px; flex-wrap: wrap; }
+  nav.tabs button { background: none; border: 0; color: #b7c7bc; font: inherit; font-weight: 600; padding: 11px 16px; cursor: pointer; border-bottom: 3px solid transparent; }
+  nav.tabs button.on { color: #fff; border-bottom-color: var(--light); } nav.tabs button.dim { opacity: .6; }
+  .intro { max-width: 1500px; margin: 0 auto; padding: 18px 24px 0; display: grid; grid-template-columns: 1fr auto; gap: 8px 30px; align-items: end; }
+  .intro h1 { margin: 0; font-size: 22px; } .intro p { margin: 4px 0 0; max-width: 780px; color: #334155; }
+  .gate { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; min-width: 260px; } .gate small { color: var(--muted); display: block; } .gate b { color: var(--green); }
+  .wrap { display: flex; gap: 22px; padding: 18px 24px 40px; align-items: flex-start; justify-content: center; flex-wrap: wrap; max-width: 1700px; margin: 0 auto; }
   .phone { display: flex; flex-direction: column; gap: 8px; width: 390px; }
   .phone h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; } .dot { width: 10px; height: 10px; border-radius: 50%; background: #16a34a; }
   .ctl { display: flex; gap: 6px; } .nb { display: flex; align-items: center; gap: 4px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font-size: 13px; white-space: nowrap; }
@@ -16,45 +23,107 @@
   .bezel { border: 10px solid #111827; border-radius: 40px; overflow: hidden; background: #fff; box-shadow: 0 24px 60px rgba(15,23,42,.3); height: 780px; }
   .bezel iframe { width: 100%; height: 100%; border: 0; display: block; }
   .side { width: 520px; display: flex; flex-direction: column; gap: 12px; } .side .bezel { border-radius: 14px; border-width: 6px; height: 560px; }
-  .card { background: #fff; border-radius: 12px; padding: 14px 16px; } .card h3 { margin: 0 0 6px; font-size: 14px; } .card ol { margin: 0; padding-left: 18px; line-height: 1.55; }
+  .card { background: #fff; border-radius: 12px; padding: 14px 16px; } .card h3 { margin: 0 0 8px; font-size: 14px; } .card ol { margin: 0; padding-left: 18px; line-height: 1.55; } .card li { margin-bottom: 4px; }
+  .feat { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: start; } .feat > div small { display: block; color: var(--muted); }
+  .chip { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px; white-space: nowrap; margin-top: 1px; }
+  .chip.built { background: #dcfce7; color: #166534; } .chip.sim { background: #e0f2fe; color: #075985; } .chip.blocked { background: #fef3c7; color: #92400e; } .chip.no { background: #f1f5f9; color: #475569; }
+  .empty { max-width: 760px; margin: 10px auto; background: #fff; border: 2px dashed #cbd5e1; border-radius: 14px; padding: 26px; text-align: center; color: #475569; }
+  .pipe { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 14px 0 0; } .pipe span { background: #e8f3ea; border-radius: 999px; padding: 6px 14px; font-weight: 600; } .pipe span.warn { background: #fde7c8; } .pipe span.end { background: var(--dark); color: #fff; }
+  .guide li { margin: 0 0 4px 0; padding: 3px 8px; border-radius: 6px; } .guide li.now { background: #e5f3e8; font-weight: 600; } .guide li.done { color: #6b8f77; text-decoration: line-through; } .guide small { font-weight: 400; color: var(--muted); }
+  .gbtns { display: flex; gap: 8px; margin-top: 10px; } .gbtns button { border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 700; cursor: pointer; background: var(--green); color: #fff; } .gbtns button.alt { background: #e2e8f0; color: #0f172a; }
+  .flow ol { padding-left: 0; list-style: none; counter-reset: n; } .flow li { margin: 0 0 8px 22px; position: relative; } .flow li:not(.cont) { counter-increment: n; } .flow li:not(.cont)::before { content: counter(n) '.'; position: absolute; left: -22px; font-weight: 600; } .flow li.cont { margin-top: -4px; }
+  button.go { display: inline-block; margin-top: 4px; background: var(--green); color: #fff; border: 0; border-radius: 8px; padding: 5px 10px; font: inherit; font-weight: 600; cursor: pointer; } button.go.done { background: #6b8f77; } button.go:disabled { opacity: .6; }
+  code { background: #eef2f6; border-radius: 4px; padding: 0 4px; font-size: 12px; }
   @media (max-width: 1500px) { .side { width: 390px; } }
 </style>
 </head>
 <body>
-<header><b>Field Collect</b><small>team demo — several phones, one survey</small><span class="sp"></span>
-  <button id="add">+ Add phone</button><a href="admin.html" target="_blank">Open dev-team view ↗</a><a href="app.html" target="_blank">Open single app ↗</a></header>
+<header><b>FieldSync Collect</b><small>prototype, one tab per build phase</small><span class="sp"></span>
+  <button id="reset" title="Clears server data and every phone's local data">Reset demo data</button><a href="admin.html" target="_blank">Dev-team view ↗</a><a href="app.html" target="_blank">Everything, single app ↗</a></header>
+<nav class="tabs" id="tabs"></nav>
+<div class="intro" id="intro"></div>
 <div class="wrap" id="wrap"></div>
-<script>
-const PEOPLE = [['maria', 'Maria', 'microsoft:maria@demo.test'], ['sam', 'Sam', 'password:sam:demo'], ['priya', 'Priya', 'microsoft:priya@demo.test']];   // demo accounts (Maria + Priya use Microsoft login, Sam a password)
-const PROFILES = { good: 'Good (LTE)', poor: 'Poor (3G)', flaky: 'Flaky', offline: 'No service' };
-const wrap = document.getElementById('wrap'); let n = 0;
-function phone([id, name, signin]) {
-  const col = document.createElement('div'); col.className = 'phone';
-  col.innerHTML = `<h2><span class="dot"></span>${name}'s phone</h2>
-    <div class="ctl"><label class="nb" title="Simulated Bluetooth / Wi-Fi Direct: works with the network off"><input type="checkbox"> Nearby</label><select title="Network for this phone">${Object.entries(PROFILES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button title="Reload the app on this phone">Kill app</button></div>
-    <div class="bezel"><iframe title="${name}'s phone" src="app.html?device=${id}&signin=${encodeURIComponent(signin)}"></iframe></div>`;
-  const sel = col.querySelector('select'), fr = col.querySelector('iframe'), dot = col.querySelector('.dot');
+<script type="module">
+import { PHASES, STATUS } from './src/phases.js';
+
+const NET = { good: 'Good (LTE)', poor: 'Poor (3G)', flaky: 'Flaky', offline: 'No service' };
+const $ = (id) => document.getElementById(id);
+let current = Number((location.hash.match(/phase=(\d)/) || [])[1]) || 1;
+
+const frames = {};
+function phone(ph, [id, name, signin], wrap, side) {
+  const dev = `p${ph.id}-${id}`, col = document.createElement('div'); col.className = 'phone';
+  col.innerHTML = `<h2><span class="dot"></span>${name}</h2>
+    <div class="ctl">${ph.id === 4 ? '<label class="nb" title="Simulated Bluetooth / Wi-Fi Direct: works with the network off"><input type="checkbox"> Nearby</label>' : ''}<select title="Network for this phone">${Object.entries(NET).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button title="Reload the app on this phone">Kill app</button></div>
+    <div class="bezel"><iframe title="${name}" src="app.html?phase=${ph.id}&demo=1&device=${dev}&signin=${encodeURIComponent(signin)}"></iframe></div>`;
+  const sel = col.querySelector('select'), fr = col.querySelector('iframe'); frames[dev] = fr; const dot = col.querySelector('.dot');
   const fc = () => fr.contentWindow && fr.contentWindow.__fc;
-  col.querySelector('.nb input').onchange = (e) => { const f = fc(); if (f) (e.target.checked ? f.nearby.enable() : f.nearby.disable()); };
-  try { const saved = JSON.parse(localStorage.getItem(`fc.${id}.profile`)); if (saved) sel.value = saved; } catch {}
-  sel.onchange = () => { const f = fc(); if (!f) return; f.server.setProfile(sel.value); localStorage.setItem(`fc.${id}.profile`, JSON.stringify(sel.value)); f.engine.nudge(); f.collab.nudge(); f.reporter.nudge(); f.engine._log('info', null, `Network set to “${PROFILES[sel.value]}”.`); f.collab._emit(); dot.style.background = sel.value === 'offline' ? '#dc2626' : sel.value === 'good' ? '#16a34a' : '#f59e0b'; };
-  col.querySelector('button').onclick = () => fr.contentWindow.location.reload();
-  wrap.insertBefore(col, wrap.querySelector('.side'));
-  sel.onchange();
+  const nb = col.querySelector('.nb input'); if (nb) nb.onchange = (e) => { const f = fc(); if (f) (e.target.checked ? f.nearby.enable() : f.nearby.disable()); };
+  try { const saved = JSON.parse(localStorage.getItem(`fc.${dev}.profile`)); if (saved) sel.value = saved; } catch {}
+  sel.onchange = () => { const f = fc(); if (!f) return; f.server.setProfile(sel.value); localStorage.setItem(`fc.${dev}.profile`, JSON.stringify(sel.value)); f.engine.nudge(); f.collab.nudge(); f.reporter.nudge(); f.engine._log('info', null, `Network set to “${NET[sel.value]}”.`); f.collab._emit(); dot.style.background = sel.value === 'offline' ? '#dc2626' : sel.value === 'good' ? '#16a34a' : '#f59e0b'; };
+  col.querySelector('.ctl button').onclick = () => fr.contentWindow.location.reload();
+  wrap.insertBefore(col, side);
+  fr.addEventListener('load', () => setTimeout(sel.onchange, 600));
 }
-document.getElementById('add').onclick = () => { if (n < PEOPLE.length) phone(PEOPLE[n++]); else alert('Three phones is plenty for the demo.'); };
-const side = document.createElement('div'); side.className = 'side';
-side.innerHTML = `<div class="card"><h3>Try this</h3><ol>
-  <li><b>No signal at all:</b> set both phones to <b>No service</b> and tick <b>Nearby</b> on both. Start a team survey on Maria's phone; Sam's phone offers it under Nearby sync → <b>Join nearby</b>. Edits and photos move directly between them.</li>
-  <li>On <b>Maria's</b> phone: Surveys → <b>Start as team survey</b>. Fill in the first page.</li>
-  <li>On <b>Sam's</b> phone: Surveys → <b>Join</b> that record. Watch Maria's answers appear and the “is editing” tag when you tap a field.</li>
-  <li>Both add <b>guy wires</b> and photos (Dev tab → team demo record works too).</li>
-  <li>Set Sam to <b>No service</b>, keep editing, then restore. Everything merges.</li>
-  <li>Submit from Maria: it waits for Sam's photos to arrive.</li>
-  <li>On any phone: Health → <b>Report a problem</b>; see it land in the dev-team view.</li></ol></div>
-  <div class="bezel"><iframe title="Dev team view" src="admin.html"></iframe></div>`;
-wrap.append(side);
-phone(PEOPLE[n++]); phone(PEOPLE[n++]);
+
+function show(id) {
+  current = id; location.hash = `phase=${id}`;
+  const ph = PHASES.find((p) => p.id === id);
+  $('tabs').replaceChildren(...PHASES.map((p) => Object.assign(document.createElement('button'), { className: (p.id === id ? 'on ' : ''), textContent: p.tab, onclick: () => show(p.id) })));
+  $('intro').innerHTML = `<div><h1>${ph.tab}</h1><p>${ph.blurb}</p></div><div class="gate"><small>Window</small><b>${ph.dates}</b><small style="margin-top:6px">Exit gate</small><b>${ph.exit}</b></div>`;
+  const wrap = $('wrap'); wrap.replaceChildren();
+  const side = document.createElement('div'); side.className = 'side';
+  const feat = ph.features.map(([name, st, note]) => `<span class="chip ${st}" title="${STATUS[st]}">${st === 'built' ? 'Built' : st === 'sim' ? 'Simulated' : st === 'blocked' ? 'Blocked' : 'Not built'}</span><div><b>${name}</b>${note ? `<small>${note}</small>` : ''}</div>`).join('');
+  side.innerHTML = (ph.guide ? `<div class="card guide"><h3>Guided walkthrough <small>— a virtual finger taps the real app</small></h3><ol>${ph.guide.map(([, , label], i) => `<li data-g="${i}">${label}</li>`).join('')}</ol><div class="gbtns"><button id="gnext">Next step ▶</button><button id="gplay" class="alt">Play all</button><button id="grestart" class="alt">Restart</button></div></div>` : '') + (ph.flow ? `<div class="card flow"><h3>Shortcuts — jump straight to a state</h3><ol>${ph.flow.map((st, i) => `<li${st.say ? '' : ' class="cont"'}>${st.say || ''}${st.phone ? ` <button class="go" data-i="${i}">▶ ${st.label}</button>` : ''}</li>`).join('')}</ol></div>` : '') + `<div class="card"><h3>In this phase</h3><div class="feat">${feat}</div></div>` + '' + (ph.phones.length ? `<div class="bezel"><iframe title="Dev team view" src="admin.html"></iframe></div>` : '');
+  wrap.append(side);
+  if (ph.guide) {
+    let at = 0, busy = false, stop = false; const lis = [...side.querySelectorAll('.guide li')];
+    const mark = () => lis.forEach((li, i) => { li.className = i < at ? 'done' : i === at ? 'now' : ''; li.scrollIntoView?.({ block: 'nearest' }); }); mark();
+    const step = async () => {
+      if (busy || at >= ph.guide.length) return false; busy = true;
+      const [phoneKey, id] = ph.guide[at], fc = frames[`p${ph.id}-${phoneKey}`]?.contentWindow?.__fc;
+      try { if (!fc) throw new Error('That phone is still starting.'); await fc.guide.run(id); at++; mark(); } catch (e) { alert(e.message); busy = false; return false; }
+      busy = false; return true;
+    };
+    $('gnext') && ($('gnext').onclick = step);
+    $('gplay').onclick = async () => { stop = false; while (at < ph.guide.length && !stop) { if (!(await step())) break; await new Promise((r) => setTimeout(r, 900)); } };
+    $('grestart').onclick = () => { stop = true; at = 0; mark(); };
+  }
+  side.querySelectorAll('button.go').forEach((btn) => { btn.onclick = async () => {
+    const st = ph.flow[btn.dataset.i], fr = frames[`p${ph.id}-${st.phone}`], fc = fr?.contentWindow?.__fc;
+    if (!fc) return alert('That phone is still starting.');
+    btn.disabled = true;
+    try {
+      if (st.net) { const sel = fr.closest('.phone').querySelector('select'); sel.value = st.net; sel.onchange(); }
+      else await fc.demo[st.do](...(st.args || []));
+      btn.classList.add('done');
+    } catch (e) { alert(e.message); }
+    btn.disabled = false;
+  }; });
+  ph.phones.forEach((p) => phone(ph, p, wrap, side));
+  // The first phone loads the demo survey library for everyone once the server has none.
+  if (ph.phones.length) {
+    const first = wrap.querySelector('iframe');
+    first.addEventListener('load', async () => {
+      for (let i = 0; i < 60; i++) {
+        const f = first.contentWindow.__fc;
+        if (f) { try { const forms = await (await fetch('/api/forms', { headers: { authorization: `Bearer ${f.ctx.auth.session?.token}` } })).json(); if (Array.isArray(forms) && !forms.length) await f.loadDemoLibrary(); } catch {} return; }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    });
+  }
+}
+
+$('reset').onclick = async () => {
+  if (!confirm('Erase all demo data (server records, team surveys, reports) and every phone on this page?')) return;
+  await fetch('/api/admin/reset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  Object.keys(localStorage).filter((k) => k.startsWith('fc.')).forEach((k) => localStorage.removeItem(k));
+  document.querySelectorAll('iframe').forEach((f) => f.remove());
+  for (const d of (await indexedDB.databases?.()) || []) indexedDB.deleteDatabase(d.name);
+  setTimeout(() => location.reload(), 400);
+};
+window.addEventListener('hashchange', () => { const n = Number((location.hash.match(/phase=(\d)/) || [])[1]); if (n && n !== current) show(n); });
+show(current);
 </script>
 </body>
 </html>

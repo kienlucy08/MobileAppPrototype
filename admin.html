@@ -29,7 +29,7 @@
   <h2>Problem reports from the field</h2><div id="issues"></div>
   <h2>Surveys &amp; scope of work</h2><p class="muted" style="margin:0 0 6px">Phones group their survey library by scope. Edit a scope and press Enter; phones pick it up the next time they have signal.</p><div id="forms"></div>
   <h2>Team surveys (shared records)</h2><div id="shared"></div>
-  <h2>Records</h2><div id="records"></div>
+  <h2>Records <small style="font-weight:400;color:var(--muted)">· the web-app view: every Collect record, who contributed what, photos and status</small></h2><div id="records"></div>
   <h2>Organizations &amp; members (what the identity lookup returns)</h2>
   <p class="muted" style="margin:0 0 6px">The form's organization list shows only the organizations the signed-in user's email belongs to. JSON: [{"id","name","members":["email",…]}]</p>
   <textarea id="orgs" rows="9" style="width:100%;font:12px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
@@ -56,7 +56,7 @@ function render(o) {
   $('sess').textContent = `${o.sessions} active session(s).`;
   if (!orgsDirty && document.activeElement !== $('orgs')) $('orgs').value = JSON.stringify(o.orgs || [], null, 2);
   const st = o.stats;
-  $('tiles').innerHTML = [['Records committed', st.records], ['Photos on server', st.receivedItems], ['Duplicates prevented', st.dupesPrevented], ['Team surveys open', st.sharedOpen], ['Open reports', st.issuesOpen], ['Min form version', st.minSchema]]
+  $('tiles').innerHTML = [['Records committed', st.records], ['Photos on server', st.receivedItems], ['Duplicates prevented', st.dupesPrevented], ['Team surveys open', st.sharedOpen], ['Open reports', st.issuesOpen], ['Sent to foremen', o.notifications || 0], ['Min form version', st.minSchema]]
     .map(([l, v]) => `<div class="tile"><b>${v}</b><small>${l}</small></div>`).join('');
   $('minv').placeholder = st.minSchema;
   if (!$('forms').contains(document.activeElement)) $('forms').innerHTML = (o.forms || []).length ? `<table><tr><th>Survey</th><th>Version</th><th>Scope of work</th></tr>${o.forms.map((f) => `<tr><td>${esc(f.title)}</td><td>v${f.version}</td><td><input data-form="${esc(f.id)}" value="${esc(f.scope || '')}" placeholder="Other" style="border:1px solid var(--line);border-radius:6px;padding:4px 6px"></td></tr>`).join('')}</table>` : '<p class="muted">No surveys published yet.</p>';
@@ -67,14 +67,14 @@ function render(o) {
     <td><select data-status="${i.id}">${['open', 'triaged', 'resolved'].map((s) => `<option ${s === i.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td></tr>
     ${open.has('i' + i.id) && issueDetail[i.id] ? `<tr><td colspan="6"><div class="detail">${issueHtml(issueDetail[i.id])}</div></td></tr>` : ''}`).join('')}</table>` : '<div class="empty">No reports. When a field user taps “Report a problem” (or a record fails) it appears here with the log attached.</div>';
 
-  $('shared').innerHTML = o.shared.length ? `<table><tr><th>Record</th><th>Started by</th><th>Photos received</th><th>Edits</th><th>Status</th></tr>${o.shared.map((s) => `
-    <tr><td><b>${esc(s.title)}</b></td><td>${esc(s.createdByName)}</td><td><div class="bar"><i style="width:${s.photos ? (s.photosReceived / s.photos) * 100 : 0}%"></i></div>${s.photosReceived}/${s.photos}</td><td>${s.rev}</td>
+  $('shared').innerHTML = o.shared.length ? `<table><tr><th>Record</th><th>Started by</th><th>Assigned to</th><th>Photos received</th><th>Edits</th><th>Status</th></tr>${o.shared.map((s) => `
+    <tr><td><b>${esc(s.title)}</b></td><td>${esc(s.createdByName)}</td><td>${(s.assignees || []).map((a) => esc(a.name)).join(', ') || '—'}</td><td><div class="bar"><i style="width:${s.photos ? (s.photosReceived / s.photos) * 100 : 0}%"></i></div>${s.photosReceived}/${s.photos}</td><td>${s.rev}</td>
     <td>${s.status === 'submitted' ? `<span class="pill ok">Submitted #${s.recordId}</span>${s.amended ? ' <span class="pill warn">amended</span>' : ''}` : '<span class="pill blue">Open</span>'}</td></tr>`).join('')}</table>` : '<div class="empty">No team surveys yet.</div>';
 
-  $('records').innerHTML = o.records.length ? `<table><tr><th>Record</th><th>By</th><th>Type</th><th>Photos</th><th>Size</th><th>Form</th><th>Status</th></tr>${o.records.map((r) => `
-    <tr class="click" data-rec="${r.id}"><td><b>${esc(r.label)}</b></td><td>${esc(r.by) || '—'}</td><td>${r.shared ? 'Team' : 'Single'}</td><td>${r.photos}/${r.expected || r.photos}</td><td>${mb(r.bytes)}</td><td>v${r.schemaVersion}</td>
+  $('records').innerHTML = o.records.length ? `<table><tr><th>Record</th><th>By</th><th>Type</th><th>Who captured what</th><th>Photos</th><th>Size</th><th>Form</th><th>Status</th></tr>${o.records.map((r) => `
+    <tr class="click" data-rec="${r.id}"><td><b>${esc(r.label)}</b></td><td>${esc(r.by) || '—'}</td><td>${r.shared ? 'Team' : 'Single'}</td><td>${(r.contributors || []).map((c) => `${esc(c.who)}: ${c.photos} photos, ${c.answers} answers`).join('<br>') || '—'}</td><td>${r.photos}/${r.expected || r.photos}</td><td>${mb(r.bytes)}</td><td>v${r.schemaVersion}</td>
     <td>${r.committed ? `<span class="pill ok">#${r.recordId}</span>` : '<span class="pill warn">in progress</span>'}</td></tr>
-    ${open.has('r' + r.id) ? `<tr><td colspan="7"><div class="gal">${r.sample.map((p) => `<img loading="lazy" src="/api/media/${r.id}/${p}" alt="">`).join('') || '<span class="muted">No photos yet</span>'}</div></td></tr>` : ''}`).join('')}</table>` : '<div class="empty">No records yet.</div>';
+    ${open.has('r' + r.id) ? `<tr><td colspan="8"><div class="gal">${r.sample.map((p) => `<img loading="lazy" src="/api/media/${r.id}/${p}" alt="">`).join('') || '<span class="muted">No photos yet</span>'}</div></td></tr>` : ''}`).join('')}</table>` : '<div class="empty">No records yet.</div>';
 }
 
 function issueHtml(i) {

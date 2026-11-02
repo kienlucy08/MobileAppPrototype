@@ -14,7 +14,7 @@ export class Reporter extends EventTarget {
   }
   async start() { this.pending = (await this.db.getAll('issues')).filter((i) => !i.sent).length; this._loop(); }
 
-  async build({ message, subId, code, includeRecord = true }) {
+  async build({ message, subId, code, includeRecord = true, notify = false }) {
     const e = this.engine, sub = subId && e.subs.get(subId);
     const log = (await this.db.getAll('log')).slice(-300).map(({ ts, level, code, msg, subId }) => ({ ts, level, code, msg, subId }));
     const est = await navigator.storage?.estimate?.().catch(() => null);
@@ -25,7 +25,7 @@ export class Reporter extends EventTarget {
     } : null;
     return {
       id: newId(), ts: Date.now(), message: message || '', code: code || sub?.error?.code || null,
-      user: this.device.name, device: this.device.id, appVersion: APP_VERSION, ua: navigator.userAgent,
+      user: this.device.name, userEmail: this.device.email, notify: notify || undefined, device: this.device.id, appVersion: APP_VERSION, ua: navigator.userAgent,
       network: { profile: this.server.profileName, engine: e.svc, team: this.collab.svc, online: navigator.onLine },
       summary: { ...e.summary(), unsyncedEdits: this.collab.unsynced() },
       storage: est ? { usage: est.usage, quota: est.quota } : null,

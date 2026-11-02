@@ -105,7 +105,7 @@ await test('schema drift: record rejected with ERR-SYNC-001 (specific, coded), n
 
 await test('oversized photo: permanent ERR-IMG-001 on that item; sibling photos still delivered', async () => {
   const { server, engine, sub } = await setup(10, 'good');
-  engine.media.get('m2').size = 11 * 1024 * 1024;
+  engine.media.get('m2').size = 31 * 1024 * 1024;
   await engine.submit(sub, new Set(engine.mediaFor(sub.id).map((m) => m.id)));
   await until(() => sub.status === 'failed');
   assert.equal(sub.error.code, 'ERR-IMG-001');
@@ -114,6 +114,19 @@ await test('oversized photo: permanent ERR-IMG-001 on that item; sibling photos 
   await engine.retry(sub.id);
   await until(() => sub.status === 'complete');
   assert.equal(server.stats().receivedItems, 10);
+});
+
+await test('failed photo: "go to the problem" reopens the record, the bad photo is removed, resending completes with the rest', async () => {
+  const { server, engine, sub } = await setup(10, 'good');
+  engine.media.get('m2').size = 31 * 1024 * 1024;
+  await engine.submit(sub, new Set(engine.mediaFor(sub.id).map((m) => m.id)));
+  await until(() => sub.status === 'failed');
+  await engine.reopen(sub.id);
+  assert.equal(sub.status, 'draft'); assert.equal(engine.media.get('m2').lastError, 'ERR-IMG-001');
+  await engine.removeMedia('m2');
+  await engine.submit(sub, new Set(engine.mediaFor(sub.id).map((m) => m.id)));
+  await until(() => sub.status === 'complete');
+  assert.equal(server.stats().receivedItems, 9); assert.equal(server.stats().records, 1);
 });
 
 console.log('schema');

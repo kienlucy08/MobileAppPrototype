@@ -44,6 +44,8 @@ maria.collab.attach(doc.id, () => {});   // an open form = an active, fast-polli
 await test('second phone joins the shared record and sees its answers', async () => {
   edit(maria, doc.id, (a) => { a.siteId = 'TWR-4471'; a.towerType = 'guyed'; });
   await until(() => maria.collab.list.length || core.state.shared[doc.id]?.ops.length >= 2);
+  await until(() => doc.created);
+  await maria.collab.assign(doc.id, { add: ['sam@demo.test'] });          // the crew lead shares it with Sam
   await until(async () => (await sam.srv.listShared()).length === 1);
   const meta = (await sam.srv.listShared())[0];
   await sam.collab.join(meta); sam.collab.attach(doc.id, () => {});
@@ -143,6 +145,8 @@ await test('submitting twice (lost reply) returns the same record, no duplicate 
 await test('forced submit while a teammate is offline: their late edits are folded into the record, not lost', async () => {
   const d2 = maria.collab.create({ survey, title: 'TWR-9 second record' }); maria.collab.attach(d2.id, () => {});
   edit(maria, d2.id, (a) => { a.siteId = 'TWR-9'; });
+  await until(() => d2.created);
+  await maria.collab.assign(d2.id, { add: ['sam@demo.test'] });
   await until(async () => (await sam.srv.listShared()).length === 2);
   await sam.collab.join((await sam.srv.listShared()).find((m) => m.id === d2.id)); sam.collab.attach(d2.id, () => {});
   await until(() => ans(sam, d2.id).siteId === 'TWR-9');

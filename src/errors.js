@@ -7,7 +7,7 @@ export const ERRORS = {
   'ERR-FIELD-003': { title: 'Text too long', cause: 'The value is longer than the field allows (this is what silently breaks Survey123 sends).', fix: 'Shorten the text', action: 'goto' },
   'ERR-FIELD-004': { title: 'Wrong number format', cause: 'A number question contains something that is not a valid number.', fix: 'Correct the value', action: 'goto' },
   'ERR-FIELD-005': { title: 'Invalid choice', cause: 'The stored answer is not one of the choices in this form version.', fix: 'Re-select an answer', action: 'goto' },
-  'ERR-IMG-001': { title: 'Photo exceeds server size limit', cause: 'The file is larger than the 10 MB per-photo limit.', fix: 'Compress & resend', action: 'retry' },
+  'ERR-IMG-001': { title: 'Photo exceeds server size limit', cause: 'The file is larger than the 30 MB per-photo limit.', fix: 'Compress & resend', action: 'retry' },
   'ERR-IMG-002': { title: 'Photo could not be read', cause: 'The image is corrupt, an unsupported format (e.g. HEIC on this browser), or its local copy is gone.', fix: 'Remove and re-add the photo', action: 'goto' },
   'ERR-IMG-003': { title: 'Photo count out of range', cause: 'The number of photos is below the minimum or above the maximum for this question.', fix: 'Add or remove photos', action: 'goto' },
   'ERR-STO-001': { title: 'Device storage is nearly full', cause: 'There is not enough free space to keep another photo safely.', fix: 'Free space or sync first', action: 'none' },
@@ -22,6 +22,7 @@ export const ERRORS = {
   'ERR-AUTH-001': { title: 'Your account is no longer signed in', cause: 'The account was removed from FieldSync (or the session was revoked). Records already sent stay on the server under your name.', fix: 'Export what is on this phone, then sign in with another account', action: 'export' },
   'ERR-AUTH-002': { title: 'Wrong username or password', cause: 'Use the same username and password you use on the FieldSync web app.', fix: 'Try again', action: 'none' },
   'ERR-AUTH-003': { title: 'This Microsoft account has no FieldSync access', cause: 'The account is not set up in FieldSync.', fix: 'Ask your admin to add you', action: 'none' },
+  'ERR-AUTH-004': { title: 'Your role cannot do that', cause: 'Crew members add photos and data; the crew lead (or a PM) submits the final record and shares or reassigns it.', fix: 'Ask your crew lead', action: 'none' },
   'ERR-GEN-000': { title: 'Unexpected internal error', cause: 'Something the app did not anticipate. Detail is attached to the log entry.', fix: 'Export log and share with support', action: 'export' },
 };
 

@@ -15,6 +15,10 @@ import { Library, tileOf } from './library.js';
 import { demoPlaceholders, PREWORK_TILE } from './demoLibrary.js';
 import { setChoices } from './expr.js';
 import { describe } from './errors.js';
+import { has, PHASE } from './phases.js';
+import { can, ROLES } from './serverCore.js';
+import { photoFirst, scenePhoto } from './capture.js';
+import { guideSteps } from './guide.js';
 import { h, fmtBytes, fmtTime, uid, download } from './util.js';
 import { icon } from './icons.js';
 
@@ -38,10 +42,13 @@ const lookups = new Lookups({ server, storageKey: K('lookups') });
 const library = new Library({ storageKey: K('library') });
 const nearby = new Nearby({ collab, engine, db, device });
 const orgs = new Orgs({ server, storageKey: K('orgs'), getEmail: () => device.email });
-const ctx = { db, server, engine, collab, reporter, lookups, orgs, auth, nearby, library, device, survey: LS.get('survey', SAMPLE_SURVEY), toast };
+const ctx = { db, server, engine, collab, reporter, lookups, orgs, auth, nearby, library, device, survey: LS.get('survey', SAMPLE_SURVEY), toast, has, modal: (...a) => modal(...a), openPhotoFirst: (sub) => openPhotoFirst(sub) };
+ctx.role = () => auth.profile?.role || 'member';
+ctx.can = (action) => !has('roles') || can(ctx.role(), action);       // Phase 1 has no roles: everyone can do everything
+ctx.settings = { get original() { return has('quality') && LS.get('quality', 'optimized') === 'original'; } };
 if (S.checkSurvey(ctx.survey).length) ctx.survey = SAMPLE_SURVEY;
 setChoices(ctx.survey);
-library.merge([ctx.survey]);
+if (ctx.survey !== SAMPLE_SURVEY) library.merge([ctx.survey]);          // a survey the dev team imported on this phone
 
 let view = { name: 'home' };
 let live = null;
@@ -56,7 +63,7 @@ const $modal = h('div', { class: 'modal-wrap', hidden: true });
 // chrome
 // =================================================================================================
 function applyTheme() {
-  const t = (view.name === 'form' || view.name === 'review' ? currentSurvey()?.theme : ctx.survey.theme) || {};
+  const t = (view.name === 'form' || view.name === 'review' ? currentSurvey()?.theme : null) || {};
   const st = document.documentElement.style;
   const map = { '--primary': t.primary, '--onprimary': t.onPrimary, '--bg': t.background, '--fill': t.fieldFill, '--text': t.bodyText, '--inputtext': t.inputText, '--inputbg': t.inputBackground, '--hbg': t.headerBg, '--hfont': t.headerFont, '--fbg': t.footerBg, '--font': t.bodyFont };
   for (const [k, v] of Object.entries(map)) v ? st.setProperty(k, v) : st.removeProperty(k);
@@ -85,11 +92,13 @@ function go(name, params = {}) {
 }
 
 const TABS = [['home', 'Surveys', 'home'], ['outbox', 'Outbox', 'upload'], ['health', 'Health', 'pulse'], ['dev', 'Dev', 'code']];
+let guideRef = null;
+let notes = [];                                  // notifications addressed to this user ("Notify my foreman")
 function renderTabs() {
   const sum = engine.summary();
   const active = [...engine.subs.values()].filter((s) => s.status === 'queued' || s.status === 'uploading' || s.status === 'failed' || (s.shared && s.status === 'shared' && engine.countsFor(s.id).total - engine.countsFor(s.id).done > 0)).length;
   $tabs.replaceChildren(...TABS.map(([id, label, ic]) => h('button', { class: 'tab' + (view.name === id ? ' on' : ''), onclick: () => go(id) },
-    h('span', { class: 'tabico' }, icon(ic, 22), id === 'outbox' && active ? h('i', { class: 'badge' + (sum.failed ? ' bad' : '') }, active) : null), label)));
+    h('span', { class: 'tabico' }, icon(ic, 22), id === 'outbox' && active ? h('i', { class: 'badge' + (sum.failed ? ' bad' : '') }, active) : null, id === 'health' && notes.some((n) => !n.read) ? h('i', { class: 'badge' }, notes.filter((n) => !n.read).length) : null), label)));
   $tabs.hidden = view.name === 'form' || view.name === 'review';
 }
 
@@ -174,7 +183,7 @@ function openTeam(meta) {
 function teamRows() {
   const rows = new Map();
   for (const m of collab.list) rows.set(m.id, { meta: m, local: collab.docs.get(m.id) });
-  for (const d of collab.docs.values()) if (!rows.has(d.id)) rows.set(d.id, { meta: { id: d.id, title: d.title, formId: d.survey.id, scope: d.survey.scope, createdByName: d.createdByName, photos: 0, photosReceived: 0, status: d.status, recordId: d.recordId, unsynced: true }, local: d });
+  for (const d of collab.docs.values()) if (!rows.has(d.id) && !(d.assigned === false && !d.pending.length)) rows.set(d.id, { meta: { id: d.id, title: d.title, formId: d.survey.id, scope: d.survey.scope, createdByName: d.createdByName, photos: 0, photosReceived: 0, status: d.status, recordId: d.recordId, unsynced: true }, local: d });
   return [...rows.values()].sort((a, b) => (b.meta.createdAt || 0) - (a.meta.createdAt || 0));
 }
 const rowCard = ({ meta, local }) => {
@@ -205,17 +214,43 @@ function surveySheet(form) {
   const close = modal(form.title,
     h('div', { class: 'sheet-head' }, h('div', { class: 'tile-art small', style: `background:${t.color}` }, h('span', {}, t.text)), h('div', {}, h('small', { class: 'muted block' }, `${form.scope || 'Other'} · v${form.version} · ${form.pages.reduce((n, p) => n + p.fields.length, 0)} questions`), form.demo ? h('small', { class: 'muted block' }, 'Demo placeholder') : null)),
     h('button', { class: 'btn primary big', onclick: () => { close(); useForm(form); const sub = newDraft(); go('form', { subId: sub.id }); } }, 'Start survey'),
-    h('button', { class: 'btn big team-btn', onclick: () => { close(); startTeam(form); } }, icon('upload', 16), 'Start as team survey'),
+    has('team') ? h('button', { class: 'btn big team-btn', onclick: () => { close(); startTeam(form); } }, icon('upload', 16), 'Start as team survey') : null,
     drafts.length ? h('div', {}, h('h3', {}, 'My drafts'), drafts.map((d) => h('div', { class: 'row-card inner' }, h('div', { class: 'grow' }, h('b', {}, d.label || d.answers.siteId || d.answers.site_id || 'Untitled'), h('small', { class: 'muted block' }, `edited ${fmtTime(d.updatedAt)}`)),
       h('button', { class: 'btn small', onclick: () => { close(); go('form', { subId: d.id, page: d.page || 0 }); } }, 'Resume')))) : null,
-    team.length ? h('div', {}, h('h3', {}, 'Team records'), team.map(({ meta, local }) => h('div', { class: 'row-card inner' }, h('div', { class: 'grow' }, h('b', {}, meta.title), h('small', { class: 'muted block' }, `${meta.createdByName || 'someone'}`)),
+    has('team') && team.length ? h('div', {}, h('h3', {}, 'Team records'), team.map(({ meta, local }) => h('div', { class: 'row-card inner' }, h('div', { class: 'grow' }, h('b', {}, meta.title), h('small', { class: 'muted block' }, `${meta.createdByName || 'someone'}`)),
       (local?.status || meta.status) === 'submitted' ? h('span', { class: 'pill complete' }, 'Submitted') : h('button', { class: 'btn small primary', onclick: () => { close(); openTeam(meta); } }, local ? 'Open' : 'Join')))) : null,
     h('div', { class: 'row end' }, h('button', { class: 'btn ghost', onclick: () => close() }, 'Close')));
 }
 
+const initials = (n = '?') => String(n).trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+const brandBar = () => h('header', { class: 'appbar brand' }, h('div', { class: 'logo' }, icon('check', 16)), h('div', { class: 'ab-title' }, h('b', {}, 'FieldSync Collect'), h('small', {}, has('roles') ? `${device.name} · ${ROLES[ctx.role()]}` : 'Field data, never lost')), $chip, h('span', { class: 'avatar me', title: device.name }, initials(device.name)));
+
+/** Save state first, then "pick up where you left off". */
+function statusCards() {
+  const sum = engine.summary(), down = sum.svc === 'down' || server.profile.offline;
+  const status = sum.failed
+    ? h('div', { class: 'statuscard bad' }, icon('alert'), h('div', { class: 'grow' }, h('b', {}, `${sum.failed} photo${sum.failed === 1 ? '' : 's'} need attention`), h('small', {}, 'Your data is still saved on this phone.')), h('button', { class: 'btn small', onclick: () => go('outbox') }, 'Open'))
+    : h('div', { class: 'statuscard ' + (down ? 'wait' : 'ok') }, icon(down ? 'wifi' : 'check'), h('div', { class: 'grow' }, h('b', {}, down ? 'No signal — all saved on this phone' : 'All saved on this phone'),
+      h('small', {}, sum.pending ? `${sum.pending} photo${sum.pending === 1 ? '' : 's'} ${down ? 'waiting for signal' : 'sending'}` : 'Nothing waiting to send')), sum.pending ? h('button', { class: 'btn small', onclick: () => { engine.nudge(); collab.nudge(); } }, 'Send now') : null);
+  const sending = [...engine.subs.values()].find((s) => (s.status === 'uploading' || s.status === 'queued') && engine.countsFor(s.id).total > 0);
+  const draft = draftsOf()[0];
+  let cont = null;
+  if (sending) {
+    const c = engine.countsFor(sending.id);
+    cont = h('div', { class: 'card continue' }, h('small', { class: 'muted' }, 'Sending'), h('b', {}, sending.label || sending.surveyTitle), h('div', { class: 'bar' }, h('i', { style: `width:${c.total ? (c.done / c.total) * 100 : 0}%` })),
+      h('div', { class: 'row between' }, h('small', { class: 'grn' }, `${c.done} of ${c.total} photos delivered`), h('button', { class: 'btn small', onclick: () => go('outbox') }, 'Details')));
+  } else if (draft) {
+    const pages = draft.survey?.pages?.length || 1;
+    cont = h('div', { class: 'card continue' }, h('small', { class: 'muted' }, 'Continue'), h('b', {}, draft.label || draft.answers.siteId || draft.answers.site_id || draft.surveyTitle), h('small', { class: 'muted block' }, `${draft.surveyTitle} · draft`),
+      h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, ((draft.page || 0) + 1) / pages * 100)}%` })),
+      h('div', { class: 'row between' }, h('small', { class: 'grn' }, `${engine.mediaFor(draft.id).length} photos · page ${(draft.page || 0) + 1} of ${pages}`), h('button', { class: 'btn small primary', onclick: () => go('form', { subId: draft.id, page: draft.page || 0 }) }, 'Resume')));
+  }
+  return [status, cont];
+}
+
 function home() {
   let q = '';
-  const banner = h('div', {}), chips = h('div', { class: 'scopes' }), grid = h('div', { class: 'tiles-grid' }), teamBox = h('div', {}), draftsBox = h('div', {}), nearbyBox = h('div', {});
+  const statusBox = h('div', {}), banner = h('div', {}), chips = h('div', { class: 'scopes' }), grid = h('div', { class: 'tiles-grid' }), teamBox = h('div', {}), draftsBox = h('div', {}), nearbyBox = h('div', {});
   const scope = () => LS.get('scope', '');
   const inScope = (sc) => !scope() || (sc || 'Other') === scope();
   const inQuery = (t) => !q.trim() || String(t).toLowerCase().includes(q.trim().toLowerCase());
@@ -236,13 +271,14 @@ function home() {
     const min = server.stats().minSchema, old = library.all.filter((f) => f.version < min);
     banner.replaceChildren(...(old.length ? [h('div', { class: 'banner warn' }, icon('alert'), h('div', {}, h('b', {}, `Form v${min} is required`), h('p', {}, `${old.length} survey${old.length === 1 ? '' : 's'} on this phone are older than the server accepts; records collected on them would be rejected with ERR-SYNC-001.`), h('button', { class: 'btn small primary', onclick: () => { library.merge(old.map((f) => ({ ...f, version: min }))); toast(`Surveys updated to v${min}`); render(); } }, `Update to v${min}`)))] : []));
     drawChips(); drawGrid();
-    nearbyBox.replaceChildren(h('div', { class: 'card nearby' },
+    nearbyBox.replaceChildren(...(!has('nearby') ? [] : [h('div', { class: 'card nearby' },
       h('div', { class: 'row between' }, h('div', {}, h('b', {}, icon('wifi', 15), ' Nearby sync'), h('small', { class: 'muted block' }, nearby.enabled ? (nearby.peerList().length ? `${nearby.peerList().map((p) => p.name).join(', ')} within range — works with no signal` : 'On — looking for teammates nearby…') : 'Work together with no signal at all: phones sync directly')),
         h('button', { class: 'btn small' + (nearby.enabled ? ' primary' : ''), onclick: () => { nearby.enabled ? nearby.disable() : nearby.enable(); drawLive(); } }, nearby.enabled ? 'On' : 'Turn on')),
       ...nearby.available().map(({ peer, doc }) => h('div', { class: 'row-card inner' }, h('div', { class: 'grow' }, h('b', {}, doc.title), h('small', { class: 'muted block' }, `${peer.name}'s phone · ${doc.status === 'submitted' ? 'submitted' : 'open'}`)),
-        doc.status === 'submitted' ? null : h('button', { class: 'btn small primary', onclick: () => { nearby.join(peer.id, doc.id); toast(`Joining “${doc.title}” from ${peer.name}…`); } }, 'Join nearby')))));
+        doc.status === 'submitted' ? null : h('button', { class: 'btn small primary', onclick: () => { nearby.join(peer.id, doc.id); toast(`Joining “${doc.title}” from ${peer.name}…`); } }, 'Join nearby'))))]));
     const rows = teamRows().filter(({ meta, local }) => inScope(meta.scope ?? local?.survey?.scope) && inQuery(meta.title));
-    teamBox.replaceChildren(h('h3', {}, `Team surveys${scope() ? ` · ${scope()}` : ''}`), ...(rows.length ? rows.map(rowCard) : [h('p', { class: 'muted pad0' }, 'None yet. Open a survey and choose “Start as team survey” — a teammate on another phone can join it.')]));
+    teamBox.replaceChildren(...(!has('team') ? [] : [h('h3', {}, `Team surveys${scope() ? ` · ${scope()}` : ''}`), ...(rows.length ? rows.map(rowCard) : [h('p', { class: 'muted pad0' }, 'None yet. Open a survey and choose “Start as team survey” — a teammate on another phone can join it.')])]));
+    statusBox.replaceChildren(...statusCards().filter(Boolean));
     const drafts = draftsOf().filter((d) => inScope(d.survey?.scope) && inQuery(d.surveyTitle + ' ' + (d.label || '')));
     draftsBox.replaceChildren(...(drafts.length ? [h('h3', {}, 'My drafts'), ...drafts.map((d) => h('div', { class: 'card row-card' },
       h('div', {}, h('b', {}, d.answers.siteId || d.answers.site_id || 'Untitled'), h('small', { class: 'muted block' }, `${d.surveyTitle} · ${engine.mediaFor(d.id).length} photos · edited ${fmtTime(d.updatedAt)}`)),
@@ -253,10 +289,10 @@ function home() {
   live = drawLive;
   const search = h('input', { class: 'input search', type: 'search', placeholder: 'Search surveys', 'aria-label': 'Search surveys' });
   search.addEventListener('input', () => { q = search.value; drawGrid(); drawLive(); });
-  const body = h('div', { class: 'scroll pad' }, banner, search, chips, grid, nearbyBox, teamBox, draftsBox);
+  const body = h('div', { class: 'scroll pad' }, statusBox, banner, search, chips, grid, nearbyBox, teamBox, draftsBox);
   drawLive();
   if (library.scopes().length > 1 && LS.get('scopeAsked', '') !== today() && !$modal.hidden === false) setTimeout(() => { if (view.name === 'home' && $modal.hidden && LS.get('scopeAsked', '') !== today()) scopeSheet(); }, 350);
-  return h('div', { class: 'screen' }, appbar('My Surveys', `${device.name} · ${device.email}`, $chip), body);
+  return h('div', { class: 'screen' }, brandBar(), body);
 }
 
 function formView() {
@@ -281,6 +317,16 @@ const COLORS = { done: '#16a34a', uploading: '#2563eb', retrying: '#f59e0b', que
 const d0 = (sub) => describe(sub.error?.code);
 const exportSub = (sub) => download(`record-${sub.id.slice(0, 8)}.json`, { submission: sub, media: engine.mediaFor(sub.id).map(({ thumb, ...m }) => m) });
 const reportSub = (sub) => reportSheet(sub.id, sub.error?.code ? `Record failed: ${sub.error.code}` : '');
+
+/** "Go to the problem": reopen the failed record at the question whose photo failed, with that photo flagged for replacing. */
+async function fixProblem(sub) {
+  const bad = engine.mediaFor(sub.id).find((m) => m.state === 'failed');
+  await engine.reopen(sub.id);
+  const survey = sub.survey, top = String(bad?.fieldPath || '').split('/')[0];
+  const page = Math.max(0, survey.pages.findIndex((p) => p.fields.some((f) => f.name === top)));
+  toast(`Replace the flagged photo (${bad?.lastError || 'problem'}), then Review → Save & send.`, 5000);
+  go('form', { subId: sub.id, page, focusPath: bad?.fieldPath });
+}
 
 function subCard(sub) {
   const title = h('b', {}), pill = h('span', { class: 'pill' }), meta = h('small', { class: 'muted block' });
@@ -335,6 +381,7 @@ function subCard(sub) {
     }
     const buttons = [];
     if (sub.status === 'failed') {
+      if (!sub.shared && engine.mediaFor(sub.id).some((m) => m.state === 'failed')) buttons.push(h('button', { class: 'btn small primary', onclick: () => fixProblem(sub) }, icon('back', 15), 'Go to the problem'));
       if (d0(sub).action === 'retry') buttons.push(h('button', { class: 'btn small primary', onclick: () => engine.retry(sub.id) }, icon('refresh', 15), d0(sub).fix));
       buttons.push(h('button', { class: 'btn small', onclick: () => reportSub(sub) }, icon('upload', 15), sub.reported ? 'Reported · add details' : 'Send to dev team'));
       buttons.push(h('button', { class: 'btn small ghost', onclick: () => exportSub(sub) }, icon('download', 15), 'Export record'));
@@ -372,11 +419,97 @@ function reportSheet(subId, prefill = '') {
   const msg = h('textarea', { class: 'input', rows: 4, placeholder: 'What happened? (optional — the log is attached automatically)' });
   msg.value = prefill;
   const inc = h('input', { type: 'checkbox', checked: true });
+  const notify = h('input', { type: 'checkbox' });
   const close = modal('Send to dev team',
     h('p', { class: 'muted' }, 'Sends the last 300 log lines, this phone’s network and queue state, app version' + (subId ? ' and the record’s answers and photo states (not the photos)' : '') + '. If you have no signal it is queued and sent automatically.'),
     msg, subId ? h('label', { class: 'check-line' }, inc, ' Include this record') : null,
+    has('notify') ? h('label', { class: 'check-line' }, notify, ' Also notify my foreman / PM') : null,
     h('div', { class: 'row end' }, h('button', { class: 'btn ghost', onclick: () => close() }, 'Cancel'),
-      h('button', { class: 'btn primary', onclick: async () => { close(); await reporter.send({ message: msg.value, subId, includeRecord: inc.checked }); toast(server.profile.offline ? 'Report saved — will send when you have signal.' : 'Report sent to the dev team.'); } }, 'Send report')));
+      h('button', { class: 'btn primary', onclick: async () => { close(); await reporter.send({ message: msg.value, subId, includeRecord: inc.checked, notify: notify.checked }); toast(server.profile.offline ? 'Report saved — will send when you have signal.' : notify.checked ? 'Report sent to the dev team and your foreman.' : 'Report sent to the dev team.'); } }, 'Send report')));
+}
+
+/** "Reports from your crew": problems a crew member sent with "Notify my foreman / PM". */
+let marking = false;
+function crewReports() {
+  const unread = notes.filter((n) => !n.read);
+  if (unread.length && !marking) { marking = true; server.readNotifications().then(() => setTimeout(() => { notes.forEach((n) => { n.read = true; }); marking = false; renderTabs(); }, 4000)).catch(() => { marking = false; }); }
+  return h('div', { class: 'card' }, h('b', {}, icon('bell', 15), ' Reports from your crew'),
+    ...(notes.length ? notes.slice(0, 8).map((n) => h('div', { class: 'row-card inner' }, h('div', { class: 'grow' }, h('b', {}, `${n.from}${n.code ? ` · ${n.code}` : ''}`), h('small', { class: 'muted block' }, n.message || 'No message — log attached for the dev team.'), h('small', { class: 'muted block' }, fmtTime(n.ts))), n.read ? null : h('span', { class: 'pill failed' }, 'New')))
+      : [h('p', { class: 'muted' }, 'Nothing yet. When someone on your crew taps “Notify my foreman” on a problem, it shows up here.')]));
+}
+async function pollNotes() {
+  if (!has('notify') || !auth.signedIn || server.profile.offline) return;
+  try { notes = await server.notifications(); renderTabs(); if (view.name === 'health') live?.(); } catch { /* offline or signed out */ }
+}
+setInterval(pollNotes, 6000);
+
+// ---- crash reporting: an uncaught error files itself (with the log) to the dev team ----
+let crashes = 0;
+const crash = (msg, stack) => { if (!has('crash') || crashes >= 5) return; crashes++; reporter.send({ code: 'ERR-GEN-000', message: `Crash: ${msg}${stack ? `\n${String(stack).slice(0, 1500)}` : ''}` }).catch(() => {}); };
+window.addEventListener('error', (e) => crash(e.message, e.error?.stack));
+window.addEventListener('unhandledrejection', (e) => crash(String(e.reason?.message || e.reason), e.reason?.stack));
+
+async function loadDemoLibrary() {
+  try {
+    const XLSX = await loadSheetJS();
+    const { survey } = convertWorkbook(XLSX, new Uint8Array(await (await fetch('CONS-MOD%20Prework%20Inspection.xlsx')).arrayBuffer()), { files: { 'customers.csv': await (await fetch('customers.csv')).text() } });
+    survey.scope = 'CONS-MOD'; survey.tile = PREWORK_TILE;
+    const all = [survey, ...demoPlaceholders()];
+    library.merge(all);
+    let shared = 0; for (const f of all) { try { await server.publishForm(f); shared++; } catch { /* offline: stays on this phone */ } }
+    toast(`${all.length} surveys loaded${shared === all.length ? ' and shared with the team' : ' (not shared yet: no signal)'}`); render();
+  } catch (e) { toast(`${e.code || 'ERR-GEN-000'}: ${e.message}`, 5000); }
+}
+
+// ---- screen-share demo helpers (called from the phase pages; each sets up the next click-through step) ----
+const demoForm = (id) => { const f = library.get(id); if (!f) throw new Error('Load the demo library first (Dev tab → Load demo library).'); useForm(f); return f; };
+const fakeShots = (zooms) => Promise.all(zooms.map((z, i) => scenePhoto(z, `${z < 1 ? 'WIDE_0.5x' : z >= 10 ? 'CLOSEUP_10x' : `PHOTO_${z}x`}_${i + 1}.jpg`)));
+async function addShots(sub, field, zooms) {
+  const r = await addImages(engine, sub, field, await fakeShots(zooms), { original: ctx.settings.original });
+  (sub.answers[field] ||= []).push(...r.ids); return r;
+}
+const demo = {
+  /** A closeout with a fake 0.5× wide shot and a fake 10× close-up, ready to Save & send. */
+  async closeout({ oversized = false } = {}) {
+    demoForm('demo-closeout-photos'); const sub = newDraft();
+    Object.assign(sub.answers, { siteId: 'TX-4412', inspector: device.name });
+    await addShots(sub, 'wideShots', [0.5, 0.5]); await addShots(sub, 'closeUps', [10, 10, 2]);
+    if (oversized) { const rec = engine.mediaFor(sub.id)[0]; rec.size = 31 * 1024 * 1024; await db.put('media', rec); sub.label = 'TX-4412 (photo too big)'; }
+    S.recalc(ctx.survey, sub.answers); await db.put('submissions', sub); go('review', { subId: sub.id });
+  },
+  oversized() { return demo.closeout({ oversized: true }); },
+  /** Every kind of validation error, each with a code and a fix button. */
+  async errors() {
+    demoForm('demo-error-messages'); const sub = newDraft();
+    Object.assign(sub.answers, { siteId: '', heightFt: 5 }); await db.put('submissions', sub); go('review', { subId: sub.id });
+  },
+  /** Phase 2: a team record Maria has started, with the answers filled in. */
+  async team() {
+    const f = demoForm('demo-closeout-photos'); const doc = collab.create({ survey: f, title: 'TX-4412 closeout (team)' });
+    seedTeamDefaults(doc); const a = collab.open(doc.id); Object.assign(a, { siteId: 'TX-4412', inspector: device.name }); collab.localChanged(doc.id, a); collab.flush(doc.id);
+    go('form', { subId: doc.id, page: 1 });
+  },
+  async share(email = 'sam@demo.test') {
+    const doc = [...collab.docs.values()].find((d) => d.status === 'open' && d.survey.id === 'demo-closeout-photos');
+    if (!doc) throw new Error('Start the team record first.');
+    for (let i = 0; i < 40 && !doc.created; i++) await new Promise((r) => setTimeout(r, 150));
+    await collab.assign(doc.id, { add: [email] }); toast('Shared with Sam');
+  },
+  /** Phase 2: the open team record gets a fake wide (0.5×) or 10× shot from this phone. */
+  async teamPhoto(zoom = 0.5) {
+    const doc = [...collab.docs.values()].find((d) => d.status === 'open' && d.survey.id === 'demo-closeout-photos');
+    if (!doc) throw new Error('Open the team record on this phone first (Join).');
+    const sub = engine.subs.get(doc.id); sub.answers = collab.open(doc.id);
+    await addShots(sub, zoom < 1 ? 'wideShots' : 'closeUps', [zoom]); collab.localChanged(doc.id, sub.answers); collab.flush(doc.id);
+    go('review', { subId: doc.id });
+  },
+  async notify() { await reporter.send({ message: 'Photos will not upload on the tower — signal keeps dropping.', code: 'ERR-NET-001', notify: true }); toast('Sent to the dev team and your foreman'); go('health'); },
+};
+
+/** Photo-first: shoot freely, then sort the photos into questions. */
+function openPhotoFirst(sub) {
+  const survey = sub.shared ? collab.docs.get(sub.id)?.survey : sub.survey;
+  photoFirst(ctx, sub, survey, { container: document.querySelector('.device') || document.body, onDone: () => go('form', { subId: sub.id, page: sub.page || 0 }) });
 }
 
 // ---- health -----------------------------------------------------------------------------------------
@@ -408,7 +541,10 @@ function health() {
         h('button', { class: 'btn primary big', onclick: () => reportSheet(null) }, icon('upload', 16), 'Report a problem'),
         h('label', { class: 'check-line' }, auto, ' Auto-send diagnostics when a record fails'),
         h('small', { class: 'muted block' }, `App ${APP_VERSION} · device ${device.id}`)),
-      h('div', { class: 'card' }, h('b', {}, device.name), h('small', { class: 'muted block' }, `${device.email} · ${(auth.profile?.organizations || []).length} organization${(auth.profile?.organizations || []).length === 1 ? '' : 's'}`),
+      has('notify') && ctx.can('share') ? crewReports() : null,
+      has('quality') ? h('div', { class: 'card' }, h('b', {}, 'Photo quality'), h('p', { class: 'muted' }, 'Optimized resizes to 2048 px and ≤1.2 MB (smaller, faster uploads). Original sends the file exactly as the camera wrote it — no re-encoding — at the cost of much larger uploads.'),
+        h('div', { class: 'seg-ctl' }, [['optimized', 'Optimized'], ['original', 'Original']].map(([v, l]) => h('button', { class: LS.get('quality', 'optimized') === v ? 'on' : '', onclick: (e) => { LS.set('quality', v); [...e.target.parentElement.children].forEach((b) => b.classList.toggle('on', b === e.target)); toast(v === 'original' ? 'New photos keep full camera quality.' : 'New photos are optimized.'); } }, l)))) : null,
+      h('div', { class: 'card' }, h('b', {}, device.name), h('small', { class: 'muted block' }, `${device.email}${has('roles') ? ` · ${ROLES[ctx.role()]}` : ''} · ${(auth.profile?.organizations || []).length} organization${(auth.profile?.organizations || []).length === 1 ? '' : 's'}`),
         h('p', { class: 'muted' }, 'Signed in with your FieldSync account. You stay signed in until the app is updated.'),
         h('button', { class: 'btn small', onclick: () => { if (confirm('Sign out? Records on this phone stay until you sign in again.')) { auth.signOut(); location.reload(); } } }, 'Sign out')),
       h('div', { class: 'row between' }, h('h3', {}, 'Sync log'), h('button', { class: 'btn small', onclick: async () => download('sync-log.json', { exportedAt: new Date().toISOString(), device, appVersion: APP_VERSION, summary: engine.summary(), server: server.stats(), entries: await db.getAll('log') }) }, icon('download', 15), 'Export')),
@@ -428,6 +564,7 @@ function conditions() {
         [[1, '1× (realistic)'], [4, '4× (default)'], [12, '12× (fast)']].map(([v, l]) => h('option', { value: v, selected: v === scale }, l))),
       h('div', { class: 'stack' },
         h('button', { class: 'btn small', onclick: () => location.reload() }, icon('refresh', 15), 'Kill app now (reload)'),
+        has('crash') ? h('button', { class: 'btn small', onclick: () => setTimeout(() => { throw new Error('Simulated crash from the Dev tab'); }, 0) }, 'Simulate a crash') : null,
         h('button', { class: 'btn small', onclick: async () => { await server.setMinSchema(server.stats().minSchema + 1); toast(`Server now requires form v${server.stats().minSchema}+`); engine._log('info', null, `Server now requires form v${server.stats().minSchema}+.`); render(); } }, 'Server: require form v+1'),
         h('button', { class: 'btn small danger', onclick: async () => { if (!confirm('Erase this phone’s data AND the server’s records, shared surveys and reports?')) return; for (const s of ['submissions', 'media', 'blobs', 'log', 'shared', 'issues']) await db.clear(s); await server.reset().catch(() => {}); Object.keys(localStorage).filter((k) => k.startsWith(`fc.${device.id}.`)).forEach((k) => localStorage.removeItem(k)); location.reload(); } }, 'Reset this phone + server')));
   };
@@ -471,17 +608,6 @@ function dev() {
         warnings.length ? h('details', { class: 'warns' }, h('summary', {}, `Conversion notes (${warnings.length})`), warnings.map((w) => h('div', { class: 'logrow warn' }, h('code', { class: 'chip' }, w.row ? `row ${w.row}` : 'file'), h('span', {}, w.message)))) : null,
         probs.length ? null : h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => { adopt(survey, false); toast(`Loaded “${survey.title}”`); } }, 'Use on this phone'), h('button', { class: 'btn', onclick: () => { adopt(survey, true); } }, 'Use + share with team')));
     } catch (e) { xlsOut.replaceChildren(h('div', { class: 'issue' }, h('code', { class: 'chip err' }, 'ERR-GEN-000'), h('p', {}, e.message))); }
-  };
-  const loadDemoLibrary = async () => {
-    try {
-      const XLSX = await loadSheetJS();
-      const { survey } = convertWorkbook(XLSX, new Uint8Array(await (await fetch('CONS-MOD%20Prework%20Inspection.xlsx')).arrayBuffer()), { files: { 'customers.csv': await (await fetch('customers.csv')).text() } });
-      survey.scope = 'CONS-MOD'; survey.tile = PREWORK_TILE;
-      const all = [survey, ...demoPlaceholders()];
-      library.merge(all);
-      let shared = 0; for (const f of all) { try { await server.publishForm(f); shared++; } catch { /* offline: stays on this phone */ } }
-      toast(`${all.length} surveys loaded${shared === all.length ? ' and shared with the team' : ' (not shared yet: no signal)'}`); render();
-    } catch (e) { toast(`${e.code || 'ERR-GEN-000'}: ${e.message}`, 5000); }
   };
   const fileIn = h('input', { type: 'file', accept: '.xlsx,.xls,.xlsm,.csv', multiple: true, hidden: true, onchange: async (e) => {
     const all = [...e.target.files], book = all.find((f) => /\.xls[xm]?$/i.test(f.name));
@@ -594,4 +720,4 @@ server.refreshStats();
 auth.refreshProfile();
 setInterval(() => { if (!server.profile.offline && auth.signedIn) auth.refreshProfile(); }, 60000);
 render();
-window.__fc = { engine, server, db, ctx, collab, reporter, device, nearby };   // handy in devtools and the multi-phone page
+window.__fc = { engine, server, db, ctx, collab, reporter, device, nearby, loadDemoLibrary, demo, guide: { run: (id) => (guideRef ||= guideSteps({ go, LS, view: () => view, engine, db, collab, device }))[id]() } };   // handy in devtools and the multi-phone page

@@ -168,3 +168,44 @@ A Survey123 account holds many surveys, so Home is a **survey library**, not a s
 - **Source of the library**: surveys published to the server arrive whenever there is signal and are cached on the phone, so the library works fully offline. Scope comes from the XLSForm `settings` sheet (`scope` or `tags`), else is inferred from the title (CONS-MOD / COP / inspection), and the dev team can change it in `/admin.html` → *Surveys & scope of work* (phones pick it up on next signal).
 - **Demo**: Dev tab → *Load demo library* imports the real CONS-MOD Prework form plus 16 clearly labelled placeholders (7 Inspections, 5 CONS-MOD, 4 COP). Your account has 4 inspection surveys; the placeholder counts are only illustrative and are changed with the scope editor.
 - **Still open**: per-user access (which surveys each person may see) is not modelled; every signed-in user currently sees every published survey. Needs the web app's permissions.
+
+## 10. The prototype by build phase (matches the all-hands deck)
+
+`/` is now one tab per phase. Each tab opens the app as `app.html?phase=N`, which shows only the features of that phase, so a developer looking at Phase 1 never meets a Phase 2 feature. `src/phases.js` is the single list of which feature belongs to which phase; the tab text (what is built, simulated, blocked, not built, and what to try) lives in the same file.
+
+| Tab | In the app | Notes |
+|---|---|---|
+| **Phase 1 · MVP reliability** | Offline store, resumable upload with backoff, 400+ photos, image pipeline, form renderer (JSON/XLSForm), coded errors, health + one-tap report, form version lock, status-first home, survey library by scope | One phone, no teams |
+| **Phase 2 · Team-ready** | Everything above plus: team surveys, roles + server-enforced permissions, share/reassign, who-captured-what, "Notify my foreman", crash reports, camera (0.5×/1×/2×, rapid-fire), original photo quality, photo-first, field calculations (guy facilities), web-app records view | Three phones: Maria (crew lead), Sam (crew member), Priya (PM) |
+| **Later · Offline team sync** | Nearby sync (simulated radio) | Deck says "offline phone-to-phone later" |
+
+### What the new Phase 2 pieces do
+- **Roles** (`member`, `lead`, `pm`) live on the account. The server refuses final submit from a crew member and refuses share/reassign from anyone below a lead (`ERR-AUTH-004`). The app mirrors the rule (disabled button + explanation); the review screen has a demo-only "try anyway" so the server check is visible.
+- **Share / reassign**: a team record is visible only to the people it is shared with; a PM sees every site. Removing someone drops the record from their list once their phone syncs; whatever they entered stays on the record, credited to them.
+- **Attribution**: answers, repeat entries and photos carry the author's name; shown per record in the app (review screen, team panel) and in the dev-team page.
+- **Notify my foreman**: a report can also go to the reporter's foreman (else the crew leads in their organization); it appears under Health → *Reports from your crew*, as well as going to the dev team.
+- **Crash reports**: uncaught errors file themselves with the log (capped at 5 per session). Dev tab → *Simulate a crash*.
+- **Camera**: real zoom where the browser exposes it; where it does not (and on desktop, where a simulated scene is used) the 0.5× button says it needs the native build. Rapid-fire shooting, one batch at a time.
+- **Photo quality**: *Optimized* (2048 px, ≤1.2 MB) or *Original* (the camera's JPEG untouched). Server limit raised to 30 MB per photo.
+- **Photo-first** (open UX question #4): shoot or add photos first, then select and move them into questions. Unsorted photos block submit, so none can be silently left behind.
+- **Field calculations**: *FS Guy Facilities Inspection* computes wire length, angle and a CHECK flag inside the survey. **The equations are placeholders**; the real ones and their test cases are still blocked.
+
+### Conflicts in the source material (decide before building native)
+1. **Photo quality vs upload size.** The deck's headline is "69% smaller uploads" (resize on device); the field feedback says quality loss is a high-severity complaint and asks for native quality with no re-encoding. The prototype offers both; the default is Optimized.
+2. **Staying signed in.** Deck decision 12 proposes 30 or 60 days with remote revoke/wipe; the earlier direction was "never re-authenticate unless the app updates", which is what the prototype does.
+3. **Personal (non-team) surveys.** Permissions are enforced on team records only. A crew member can still submit their own solo record.
+
+## 11. Click-through demo flows (for screen shares)
+
+Each phase tab has a **Demo flow** card. Numbered steps are narration; a green **▶** button sets up that step for you on the right phone, so the presenter only taps the real app.
+- **Phase 1**: build a closeout with a fake 0.5× wide shot and fake 10× close-ups → Save & send → Outbox goes green → cut/restore signal → *error survey* (ERR-FIELD-001/002, ERR-IMG-003 with fix buttons) → *too-big photo* (ERR-IMG-001 in the Outbox, other photos still delivered, Send to dev team).
+- **Phase 2**: Maria starts a team record → shares with Sam → Sam joins → Maria adds a 0.5× shot and Sam a 10× shot → who-captured-what, Sam's locked Submit (ERR-AUTH-004) → Sam notifies his foreman → it appears in Maria's Health tab.
+- **Later**: both phones offline, nearby join.
+
+The demo pages use a simulated camera (so 0.5× and 10× work on a laptop). Demo surveys *Demo · Closeout photos* and *Demo · Error messages* live under the **Demo** scope. The photo-size error works because a phone declares each photo's size and the server checks the larger of declared and received.
+
+## 12. Guided walkthroughs and "Go to the problem"
+
+- **Guided walkthrough** (top card on the Phase 1 and Phase 2 tabs): *Next step ▶* (or *Play all*) moves a virtual finger through the real app — open the app → choose a scope → pick the survey → fill in the fields (typed for you) → camera popup (0.5× · 1× · 2× · 10× zoom, shutter flash, photo added) → review → Save & send → Outbox shows it delivered. Then a second record whose photo is too big: it fails with `ERR-IMG-001`, *Go to the problem*, replace the photo, send again — the Outbox ends with the failed and the delivered records side by side before the fix. Phase 2 does the same as a team: Maria starts and shares, Sam joins, each takes a photo, Sam's submit is blocked (`ERR-AUTH-004`), Maria submits.
+- **Go to the problem**: a failed record in the Outbox has a button that reopens it at the question whose photo failed. That photo is flagged red with its code and a *Replace* button (opens the camera). Photos already delivered stay delivered; resending refreshes the server's list for the unfinished record and completes it without a duplicate.
+- The camera popup is simulated in the demo pages. It is part of Phase 1 as an in-app camera; Phase 2 adds the native camera API (real 0.5× lens) and Original quality.
