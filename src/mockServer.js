@@ -60,5 +60,6 @@ export class MockServer {
   begin(a) { return withFaults(this, 2000 + JSON.stringify(a.answers).length, () => this.core.begin(a)); }
   putMedia(a) { return withFaults(this, a.size, () => this.core.putMedia(a)); }
   commit(a) { return withFaults(this, 500, () => this.core.commit(a)); }
+  siteData(site) { return withFaults(this, 1500, () => this.core.siteData(site)); }
   organizations(email) { return withFaults(this, 800, () => this.core.orgsFor(email)); }
 }

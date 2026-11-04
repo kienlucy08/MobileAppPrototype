@@ -75,6 +75,7 @@ export function createServer({ dataDir = path.join(here, 'data'), root = path.jo
     if (m === 'POST' && p === '/api/admin/reset') { core.state = freshState(); fs.rmSync(path.join(dataDir, 'media'), { recursive: true, force: true }); fs.mkdirSync(path.join(dataDir, 'media'), { recursive: true }); save(); return send(res, 200, { ok: true }); }
     if (m === 'GET' && p === '/api/admin/overview') return send(res, 200, core.overview());
 
+    if (m === 'GET' && p === '/api/sitedata') return send(res, 200, core.siteData(url.searchParams.get('site') || ''));
     if (m === 'GET' && p === '/api/team') return send(res, 200, core.teammates(user));
     if (m === 'GET' && p === '/api/notifications') return send(res, 200, core.notificationsFor(user));
     if (m === 'POST' && p === '/api/notifications/read') return send(res, 200, core.readNotifications(user));

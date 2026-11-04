@@ -2,6 +2,8 @@
 // Survey definitions are authored by developers / imported from XLSForm (trusted), so we compile with new Function.
 // Do NOT feed end-user text into this. String literals are protected: words inside quotes are never rewritten.
 
+import * as G from './guycalc.js';
+
 const cache = new Map();
 
 /** Runtime context the app plugs in: who is signed in, how to resolve async lookups, choice labels. */
@@ -9,6 +11,7 @@ export const CTX = {
   props: {},                       // pulldata("@property", name): username, email, portalurl, token
   lookup: () => undefined,         // pulldata("@javascript", file, fn, ...args) -> string | undefined while pending
   choices: {},                     // field name -> [{value,label}]   (for jr:choicename)
+  site: { level: () => undefined }, // site data pulled from other surveys of the same site (src/sitedata.js): level(siteId, guyLevel) -> elevation | undefined
 };
 export const setChoices = (survey) => {
   const out = {};
@@ -45,6 +48,13 @@ export const HELPERS = {
     const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], D = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     return String(fmt).replace(/%([YmdHMSyeaAbB])/g, (_, c) => ({ Y: t.getFullYear(), y: pad(t.getFullYear() % 100), m: pad(t.getMonth() + 1), d: pad(t.getDate()), e: t.getDate(), H: pad(t.getHours()), M: pad(t.getMinutes()), S: pad(t.getSeconds()), b: M[t.getMonth()], B: M[t.getMonth()], a: D[t.getDay()], A: D[t.getDay()] }[c]));
   },
+  // Guy-wire calculations (src/guycalc.js). Empty inputs give '' so a half-filled form never shows NaN.
+  sitelevel: (site, level) => { if (!site || level === '' || level == null) return ''; return CTX.site.level(String(site), level) ?? ''; },
+  guychord: (radius, elev, drop) => (radius === '' || radius == null || elev === '' || elev == null ? '' : G.round1(G.chord(radius, elev, drop))),
+  guymin: (strength) => (strength === '' || strength == null ? '' : G.allowable({ breakingStrength: strength }).min),
+  guymax: (strength) => (strength === '' || strength == null ? '' : G.allowable({ breakingStrength: strength }).max),
+  guystatus: (tension, min, max) => (tension === '' || tension == null || min === '' ? '' : Number(tension) < Number(min) ? 'LOW' : Number(tension) > Number(max) ? 'HIGH' : 'OK'),
+  pntdeg: (shift, d, m, s) => (shift === '' || shift == null ? '' : G.round1(G.readingDeg({ shift, degrees: d, minutes: m, seconds: s }) * 1000) / 1000),
   // Survey123 data lookups. "@javascript" calls resolve asynchronously (and survive being offline) via CTX.lookup.
   pulldata: (src, ...a) => {
     switch (src) {

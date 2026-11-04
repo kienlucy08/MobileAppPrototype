@@ -123,6 +123,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     wrappers = wrappers.filter((w) => body.contains(w.el));
     for (const w of wrappers) { w.el.hidden = !w.visible(); w.relabel?.(); w.sync?.(); }
   };
+  if (ctx.siteData) cleanups.push(ctx.siteData.onResolve(() => changed()));       // structure-survey values arrived for this site
   if (ctx.lookups) cleanups.push(ctx.lookups.onResolve(() => changed()));       // weather / member lookup finished (possibly after being offline)
 
   // ---- teammates' edits ---------------------------------------------------------------------------

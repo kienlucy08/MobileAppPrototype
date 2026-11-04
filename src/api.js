@@ -49,6 +49,7 @@ export class RemoteServer {
     return this._call(1500, 'GET', `/api/shared/${id}/ops?${q}`);
   }
   assign(id, a) { return this._call(500, 'POST', `/api/shared/${id}/assign`, a); }
+  siteData(site) { return this._call(1500, 'GET', `/api/sitedata?site=${encodeURIComponent(site)}`); }
   team() { return this._call(800, 'GET', '/api/team'); }
   notifications() { return this._call(800, 'GET', '/api/notifications'); }
   readNotifications() { return this._call(300, 'POST', '/api/notifications/read', {}); }

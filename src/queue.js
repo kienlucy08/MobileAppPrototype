@@ -128,7 +128,7 @@ export class Engine extends EventTarget {
     if (!sub.began) {
       await this._retry(sub, async () => {
         const r = await this.server.begin({
-          id: sub.id, schemaVersion: sub.schemaVersion, answers: sub.answers,
+          id: sub.id, surveyId: sub.surveyId, schemaVersion: sub.schemaVersion, answers: sub.answers,
           media: items.map((m) => ({ id: m.id, fieldPath: m.fieldPath, size: m.size, name: m.name, w: m.w, h: m.h, meta: m.meta })),
         });
         for (const id of r.have) { const m = this.media.get(id); if (m && m.state !== 'done') { m.state = 'done'; await this._saveMedia(m); } }

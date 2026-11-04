@@ -56,13 +56,13 @@ export class ServerCore {
   }
 
   // ---- individual records ------------------------------------------------------------------------
-  begin({ id, schemaVersion, answers, media, user }) {
+  begin({ id, surveyId, schemaVersion, answers, media, user }) {
     if (schemaVersion < this.state.minSchema) {
       throw new AppError('ERR-SYNC-001', `Record was collected on form v${schemaVersion}; server now requires v${this.state.minSchema}+.`);
     }
     let s = this.state.subs[id];
     const dupe = !!s;
-    if (!s) s = this.state.subs[id] = { schemaVersion, answers, manifest: Object.fromEntries(media.map((m) => [m.id, m.size])), submittedBy: user || null, received: {}, committed: false, recordId: null, meta: Object.fromEntries(media.map((m) => [m.id, { name: m.name, fieldPath: m.fieldPath, w: m.w, h: m.h, meta: m.meta }])) };
+    if (!s) s = this.state.subs[id] = { surveyId: surveyId || null, schemaVersion, answers, manifest: Object.fromEntries(media.map((m) => [m.id, m.size])), submittedBy: user || null, received: {}, committed: false, recordId: null, meta: Object.fromEntries(media.map((m) => [m.id, { name: m.name, fieldPath: m.fieldPath, w: m.w, h: m.h, meta: m.meta }])) };
     else {
       this.state.dupes++;
       if (!s.committed && !s.shared) {         // an unfinished record that was edited and re-sent (e.g. a bad photo replaced): take the new manifest, keep what already arrived
@@ -73,6 +73,17 @@ export class ServerCore {
     }
     this._dirty();
     return { have: Object.keys(s.received), dupe };
+  }
+
+  /** Answers other surveys collected for the same site, for pulling values across surveys (structure → guy facilities). Latest committed
+   *  record per survey wins. Returns { [surveyId]: answers }. */
+  siteData(site) {
+    const out = {}, at = {};
+    for (const s of Object.values(this.state.subs)) {
+      if (!s.committed || !s.surveyId || String(s.answers?.siteId ?? '').trim().toLowerCase() !== String(site).trim().toLowerCase()) continue;
+      if ((at[s.surveyId] ?? -1) < s.recordId) { at[s.surveyId] = s.recordId; out[s.surveyId] = s.answers; }
+    }
+    return out;
   }
 
   putMedia({ id, mediaId, size }) {

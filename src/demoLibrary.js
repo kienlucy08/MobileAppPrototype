@@ -22,7 +22,7 @@ const SPEC = [
 ];
 const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-export const demoPlaceholders = () => [demoCloseout(), demoErrors(), guyFacilities(), ...SPEC.filter(([t]) => t !== 'FS Guy Facilities Inspection')].map((x) => (Array.isArray(x) ? placeholder(x) : x));
+export const demoPlaceholders = () => [demoCloseout(), demoErrors(), guyFacilities(), structureClimb(), plumbTwist(), ...SPEC.filter(([t]) => !['FS Guy Facilities Inspection', 'FS Structure Climb Inspection', 'FS Plumb & Twist'].includes(t))].map((x) => (Array.isArray(x) ? placeholder(x) : x));
 const placeholder = ([title, scope, text, color]) => {
   const s = structuredClone(SAMPLE_SURVEY);
   s.id = `demo-${slug(title)}`; s.title = title; s.scope = scope; s.tile = { text, color }; s.version = 1; s.demo = true;
@@ -33,26 +33,83 @@ const placeholder = ([title, scope, text, color]) => {
 export const PREWORK_TILE = { text: 'PREWORK', color: '#a21caf' };
 
 /** Field calculations (Phase 2): values the crew needs are computed inside the survey, so a bad one surfaces on site.
- *  The geometry below is a PLACEHOLDER — the real guy-facilities equations and test cases are still to be written. */
-export function guyFacilities() {
+ *  Guy attachment elevations are collected by the climber in the structure survey and PULLED here for the same site. If they are not
+ *  available yet (not submitted, no signal) the crew can type them, and if neither happens the web app processes the record later.
+ *  The chord length is the real formula; the allowable tension limits are PLACEHOLDERS (src/guycalc.js) for the devs to replace. */
+const SRC = "sitelevel(${siteId}, ${level})";
+export function structureClimb() {
   return {
-    id: 'demo-fs-guy-facilities-inspection', version: 1, title: 'FS Guy Facilities Inspection', scope: 'Inspections', tile: { text: 'GUY FACILITIES', color: '#0e7490' }, demo: true,
+    id: 'demo-fs-structure-climb-inspection', version: 2, title: 'FS Structure Climb Inspection', scope: 'Inspections', tile: { text: 'STRUCTURE CLIMB', color: '#0e7490' }, demo: true,
     pages: [
       { name: 'site', label: 'Site', fields: [
         { name: 'siteId', type: 'text', label: 'Site ID', required: true },
-        { name: 'demo_note', type: 'note', label: '<b>Placeholder equations.</b> Wire length and angle use simple geometry to show on-site calculation. Real equations and test cases are still to be written.' },
+        { name: 'demo_note', type: 'note', label: '<b>Demo placeholder.</b> Only the part other surveys use is real: the climber records each guy level’s attachment elevation. The guy facilities and plumb &amp; twist surveys pull it for this site.' },
+      ] },
+      { name: 'guy', label: 'Guy levels', fields: [
+        { name: 'guyLevels', type: 'repeat', label: 'Guy level', addLabel: 'Add guy level', fields: [
+          { name: 'level', type: 'integer', label: 'Level', required: true, constraint: '${.} > 0', constraintMessage: 'Levels start at 1.' },
+          { name: 'elevation', type: 'decimal', label: 'Attachment elevation (ft)', required: true, hint: 'Measured by the climber', constraint: '${.} > 0', constraintMessage: 'Enter a height above zero.' },
+        ] },
+      ] },
+    ],
+  };
+}
+
+export function guyFacilities() {
+  return {
+    id: 'demo-fs-guy-facilities-inspection', version: 2, title: 'FS Guy Facilities Inspection', scope: 'Inspections', tile: { text: 'GUY FACILITIES', color: '#0e7490' }, demo: true,
+    pages: [
+      { name: 'site', label: 'Site', fields: [
+        { name: 'siteId', type: 'text', label: 'Site ID', required: true },
+        { name: 'temperature', type: 'decimal', label: 'Air temperature (°F)', hint: 'Used for the tension limits' },
+        { name: 'structureSrc', type: 'note', label: '<b>Attachment elevations</b> come from the structure survey for this site when it is on this phone or on the server. If it is not, you can type them in each wire and the web app processes the rest.' },
       ] },
       { name: 'wires', label: 'Guy wires', fields: [
         { name: 'wires', type: 'repeat', label: 'Guy wire', addLabel: 'Add guy wire', fields: [
-          { name: 'wire', type: 'text', label: 'Wire', required: true, hint: 'e.g. A-1' },
-          { name: 'attachHeight', type: 'decimal', label: 'Attachment height (ft)', required: true, constraint: '${.} > 0', constraintMessage: 'Enter a height above zero.' },
-          { name: 'anchorOffset', type: 'decimal', label: 'Anchor distance from base (ft)', required: true, constraint: '${.} > 0', constraintMessage: 'Enter a distance above zero.' },
+          { name: 'wire', type: 'text', label: 'Wire', required: true, hint: 'e.g. 2-a-1' },
+          { name: 'level', type: 'integer', label: 'Guy level', required: true, constraint: '${.} > 0', constraintMessage: 'Levels start at 1.' },
+          { name: 'compound', type: 'select_one', label: 'Anchor compound', choices: [{ value: 'a', label: 'a' }, { value: 'b', label: 'b' }, { value: 'c', label: 'c' }] },
+          { name: 'radius', type: 'decimal', label: 'Anchor radius (ft)', required: true, constraint: '${.} > 0', constraintMessage: 'Enter a distance above zero.' },
+          { name: 'dropDistance', type: 'decimal', label: 'Anchor drop (ft)', default: 0, hint: 'Negative if the anchor is below the base' },
+          { name: 'breakingStrength', type: 'decimal', label: 'Cable breaking strength (lbf)', default: 6650, hint: '3/8" EHS = 6650' },
           { name: 'tension', type: 'decimal', label: 'Measured tension (lbf)' },
-          { name: 'wireLength', type: 'decimal', label: 'Wire length (ft)', calculation: 'round(sqrt(pow(${attachHeight}, 2) + pow(${anchorOffset}, 2)), 1)' },
-          { name: 'wireAngle', type: 'decimal', label: 'Angle from ground (°)', calculation: 'round(atan(${attachHeight} div ${anchorOffset}) * 180 div pi(), 1)' },
-          { name: 'wireCheck', type: 'text', label: 'Check', calculation: "iff(${wireAngle} < 30 or ${wireAngle} > 60, 'CHECK: angle out of range', 'OK')" },
-          { name: 'wireFlag', type: 'note', label: '<b>Check this wire now</b> — the angle is outside 30°–60°. Re-measure before leaving site.', relevant: "${wireCheck} != 'OK' and ${wireCheck} != ''" },
+          { name: 'elevManual', type: 'decimal', label: 'Attachment elevation (ft): type it', hint: 'The structure survey for this site is not available yet', relevant: `${SRC} = ''` },
+          { name: 'elevSource', type: 'text', label: 'Elevation from', calculation: `iff(${SRC} != '', 'Structure survey', iff(string(\${elevManual}) != '', 'Typed in', 'Waiting: the web app will process'))` },
+          { name: 'attachElev', type: 'decimal', label: 'Attachment elevation (ft)', calculation: `iff(${SRC} != '', ${SRC}, \${elevManual})` },
+          { name: 'wireLength', type: 'decimal', label: 'Cable length (ft)', calculation: 'guychord(${radius}, ${attachElev}, ${dropDistance})' },
+          { name: 'minTension', type: 'decimal', label: 'Allowable min (lbf)', calculation: 'guymin(${breakingStrength})' },
+          { name: 'maxTension', type: 'decimal', label: 'Allowable max (lbf)', calculation: 'guymax(${breakingStrength})' },
+          { name: 'wireCheck', type: 'text', label: 'Check', calculation: "iff(${wireLength} = '', '', guystatus(${tension}, ${minTension}, ${maxTension}))" },
+          { name: 'wireFlag', type: 'note', label: '<b>Tension is out of range</b>: re-measure before leaving site.', relevant: "${wireCheck} = 'LOW' or ${wireCheck} = 'HIGH'" },
           { name: 'wirePhotos', type: 'image', label: 'Photos', minFiles: 1, maxFiles: 5, appearance: 'both' },
+        ] },
+      ] },
+    ],
+  };
+}
+
+/** Plumb & twist: each reading is degrees / minutes / seconds shifted left or right at a guy level. Heights are pulled the same way.
+ *  The twist maths and tolerance are PLACEHOLDERS (src/guycalc.js). */
+export function plumbTwist() {
+  return {
+    id: 'demo-fs-plumb-twist', version: 2, title: 'FS Plumb & Twist', scope: 'Inspections', tile: { text: 'PLUMB & TWIST', color: '#0e7490' }, demo: true,
+    pages: [
+      { name: 'site', label: 'Site', fields: [
+        { name: 'siteId', type: 'text', label: 'Site ID', required: true },
+        { name: 'demo_note', type: 'note', label: '<b>Placeholder maths.</b> Heights are pulled from the structure survey for this site; the twist and pass limit are placeholders until the real equations are installed.' },
+      ] },
+      { name: 'readings', label: 'Readings', fields: [
+        { name: 'readings', type: 'repeat', label: 'Reading', addLabel: 'Add reading', fields: [
+          { name: 'level', type: 'integer', label: 'Guy level', required: true, constraint: '${.} > 0', constraintMessage: 'Levels start at 1.' },
+          { name: 'leg', type: 'select_one', label: 'Leg', choices: [{ value: 'a', label: 'a' }, { value: 'b', label: 'b' }, { value: 'c', label: 'c' }] },
+          { name: 'elevManual', type: 'decimal', label: 'Height (ft): type it', hint: 'The structure survey for this site is not available yet', relevant: `${SRC} = ''` },
+          { name: 'height', type: 'decimal', label: 'Height (ft)', calculation: `iff(${SRC} != '', ${SRC}, \${elevManual})` },
+          { name: 'shift', type: 'select_one', label: 'Shift', required: true, choices: [{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }] },
+          { name: 'degrees', type: 'integer', label: 'Degrees', default: 0 },
+          { name: 'minutes', type: 'integer', label: 'Minutes', default: 0 },
+          { name: 'seconds', type: 'integer', label: 'Seconds', default: 0 },
+          { name: 'angle', type: 'decimal', label: 'Angle (°)', calculation: 'pntdeg(${shift}, ${degrees}, ${minutes}, ${seconds})' },
+          { name: 'check', type: 'text', label: 'Check', calculation: "iff(${angle} = '', '', iff(abs(${angle}) > 0.5, 'CHECK', 'OK'))" },
         ] },
       ] },
     ],

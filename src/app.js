@@ -9,6 +9,8 @@ import { renderForm, renderReview } from './form.js';
 import { addImages, makeTestPhoto } from './images.js';
 import { convertWorkbook, loadSheetJS } from './xlsform.js';
 import { Lookups, Orgs } from './lookups.js';
+import { SiteData } from './sitedata.js';
+import { BUNDLE, guyRecord, pntRecord } from './guycalc.js';
 import { Auth } from './auth.js';
 import { Nearby } from './nearby.js';
 import { Library, tileOf } from './library.js';
@@ -39,10 +41,11 @@ const reporter = new Reporter({ db, server, engine, collab, device });
 const auth = new Auth({ server, storageKey: K('session'), appVersion: APP_VERSION });
 auth.restore();
 const lookups = new Lookups({ server, storageKey: K('lookups') });
+const siteData = new SiteData({ server, engine, storageKey: K('sitedata') });
 const library = new Library({ storageKey: K('library') });
 const nearby = new Nearby({ collab, engine, db, device });
 const orgs = new Orgs({ server, storageKey: K('orgs'), getEmail: () => device.email });
-const ctx = { db, server, engine, collab, reporter, lookups, orgs, auth, nearby, library, device, survey: LS.get('survey', SAMPLE_SURVEY), toast, has, modal: (...a) => modal(...a), openPhotoFirst: (sub) => openPhotoFirst(sub) };
+const ctx = { db, server, engine, collab, reporter, lookups, siteData, orgs, auth, nearby, library, device, survey: LS.get('survey', SAMPLE_SURVEY), toast, has, modal: (...a) => modal(...a), openPhotoFirst: (sub) => openPhotoFirst(sub) };
 ctx.role = () => auth.profile?.role || 'member';
 ctx.can = (action) => !has('roles') || can(ctx.role(), action);       // Phase 1 has no roles: everyone can do everything
 ctx.settings = { get original() { return has('quality') && LS.get('quality', 'optimized') === 'original'; } };
@@ -250,7 +253,7 @@ function statusCards() {
 
 function home() {
   let q = '';
-  const statusBox = h('div', {}), banner = h('div', {}), chips = h('div', { class: 'scopes' }), grid = h('div', { class: 'tiles-grid' }), teamBox = h('div', {}), draftsBox = h('div', {}), nearbyBox = h('div', {});
+  const statusBox = h('div', {}), banner = h('div', {}), chips = h('div', { class: 'scopes' }), grid = h('div', { class: 'tiles-grid' }), teamBox = h('div', {}), draftsBox = h('div', {}), nearbyBox = h('div', {}), visitBox = h('div', {});
   const scope = () => LS.get('scope', '');
   const inScope = (sc) => !scope() || (sc || 'Other') === scope();
   const inQuery = (t) => !q.trim() || String(t).toLowerCase().includes(q.trim().toLowerCase());
@@ -267,6 +270,27 @@ function home() {
       return h('button', { class: 'svtile', onclick: () => surveySheet(f), 'aria-label': f.title }, h('div', { class: 'tile-art', style: `background:${t.color}` }, h('span', {}, t.text)), n ? h('i', { class: 'badge' }, n) : null, h('div', { class: 'tile-title' }, f.title));
     }) : [h('div', { class: 'empty wide' }, h('p', {}, library.all.length ? 'No surveys match.' : 'No surveys on this phone yet.'), library.all.length ? h('button', { class: 'btn small', onclick: () => { LS.set('scope', ''); q = ''; render(); } }, 'Show all surveys') : h('small', {}, 'They download here whenever you have signal, then work offline.'))]));
   };
+  // Inspection scope: the visit's 4 surveys (2 optional) for one site, and the on-site calculation once the structure heights are available.
+  const drawVisit = () => {
+    if (scope() !== 'Inspections') return visitBox.replaceChildren();
+    const site = LS.get('visitSite', ''), key = site.trim().toLowerCase();
+    const recs = (id) => [...engine.subs.values()].filter((x) => x.surveyId === id && String(x.answers?.siteId ?? '').trim().toLowerCase() === key && key).sort((a, b) => b.updatedAt - a.updatedAt);
+    const state = (id) => { const r = recs(id); return !r.length ? 'not started' : r.some((x) => x.status !== 'draft') ? 'done' : 'in progress'; };
+    const st = key ? siteData.structure(site) : undefined;
+    const guy = recs('demo-fs-guy-facilities-inspection')[0], pnt = recs('demo-fs-plumb-twist')[0];
+    const g = guy ? guyRecord(guy.answers, st?.answers) : null, tw = pnt ? pntRecord({ levels: (pnt.answers.readings || []).map((r) => ({ level: r.level, elevManual: r.elevManual, readings: [r] })) }, st?.answers) : null;
+    const input = h('input', { class: 'input', placeholder: 'Site ID (e.g. TX-1193)', value: site, 'aria-label': 'Site ID for this visit' });
+    input.addEventListener('change', () => { LS.set('visitSite', input.value); siteData.refresh(input.value); drawVisit(); });
+    const line = !key ? 'Enter the site to see its surveys and what can be calculated here.'
+      : st ? `Guy heights pulled from the structure survey (${st.answers.guyLevels.length} levels, from ${st.from}).`
+        : 'Structure survey not available yet. Guy tensions and twist will calculate here once it is on this phone or the server; or type the heights in each wire.';
+    visitBox.replaceChildren(h('div', { class: 'card visit' }, h('b', {}, 'Site visit'), h('small', { class: 'muted block' }, 'The inspection scope gives you 4 surveys; 2 are optional.'), input,
+      ...BUNDLE.map((b) => { const f = library.all.find((x) => x.id === b.id); const stt = key ? state(b.id) : '';
+        return h('div', { class: 'row between visit-row' }, h('div', {}, h('b', {}, b.title), h('small', { class: 'muted block' }, `${b.need}${b.uses ? ' · uses the structure survey' : ''}${stt ? ` · ${stt}` : ''}`)), f ? h('button', { class: 'btn small', onclick: () => surveySheet(f) }, 'Open') : null); }),
+      h('p', { class: 'muted' }, line),
+      g ? h('p', {}, h('b', {}, 'Guy tensions: '), g.waitingOnElevation ? `${g.waitingOnElevation} wire(s) waiting on a height.` : g.outOfRange ? `${g.outOfRange} wire(s) out of range, re-measure before leaving.` : 'all within range.') : null,
+      tw ? h('p', {}, h('b', {}, 'Plumb & twist: '), tw.some((x) => x.source === 'missing') ? 'some readings are waiting on a height.' : tw.some((x) => x.pass === false) ? 'a reading is outside tolerance.' : 'all within tolerance.') : null));
+  };
   const drawLive = () => {
     const min = server.stats().minSchema, old = library.all.filter((f) => f.version < min);
     banner.replaceChildren(...(old.length ? [h('div', { class: 'banner warn' }, icon('alert'), h('div', {}, h('b', {}, `Form v${min} is required`), h('p', {}, `${old.length} survey${old.length === 1 ? '' : 's'} on this phone are older than the server accepts; records collected on them would be rejected with ERR-SYNC-001.`), h('button', { class: 'btn small primary', onclick: () => { library.merge(old.map((f) => ({ ...f, version: min }))); toast(`Surveys updated to v${min}`); render(); } }, `Update to v${min}`)))] : []));
@@ -278,6 +302,7 @@ function home() {
         doc.status === 'submitted' ? null : h('button', { class: 'btn small primary', onclick: () => { nearby.join(peer.id, doc.id); toast(`Joining “${doc.title}” from ${peer.name}…`); } }, 'Join nearby'))))]));
     const rows = teamRows().filter(({ meta, local }) => inScope(meta.scope ?? local?.survey?.scope) && inQuery(meta.title));
     teamBox.replaceChildren(...(!has('team') ? [] : [h('h3', {}, `Team surveys${scope() ? ` · ${scope()}` : ''}`), ...(rows.length ? rows.map(rowCard) : [h('p', { class: 'muted pad0' }, 'None yet. Open a survey and choose “Start as team survey” — a teammate on another phone can join it.')])]));
+    drawVisit();
     statusBox.replaceChildren(...statusCards().filter(Boolean));
     const drafts = draftsOf().filter((d) => inScope(d.survey?.scope) && inQuery(d.surveyTitle + ' ' + (d.label || '')));
     draftsBox.replaceChildren(...(drafts.length ? [h('h3', {}, 'My drafts'), ...drafts.map((d) => h('div', { class: 'card row-card' },
@@ -289,7 +314,7 @@ function home() {
   live = drawLive;
   const search = h('input', { class: 'input search', type: 'search', placeholder: 'Search surveys', 'aria-label': 'Search surveys' });
   search.addEventListener('input', () => { q = search.value; drawGrid(); drawLive(); });
-  const body = h('div', { class: 'scroll pad' }, statusBox, banner, search, chips, grid, nearbyBox, teamBox, draftsBox);
+  const body = h('div', { class: 'scroll pad' }, statusBox, banner, search, chips, visitBox, grid, nearbyBox, teamBox, draftsBox);
   drawLive();
   if (library.scopes().length > 1 && LS.get('scopeAsked', '') !== today() && !$modal.hidden === false) setTimeout(() => { if (view.name === 'home' && $modal.hidden && LS.get('scopeAsked', '') !== today()) scopeSheet(); }, 350);
   return h('div', { class: 'screen' }, brandBar(), body);
@@ -714,6 +739,7 @@ auth.addEventListener('profile', () => { const p = auth.profile; if (p) { applyP
 
 await ensureSignedIn();
 lookups.install({ username: device.username, email: device.email }, auth.profile);
+siteData.install();
 orgs.refresh();
 await engine.start(); await collab.start(); await reporter.start();
 server.refreshStats();
