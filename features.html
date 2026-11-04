@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FieldSync Collect — features by phase</title>
+<style>
+  :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --green:#1f7a3d; --dark:#12281d; --light:#8fdc7a; }
+  * { box-sizing: border-box; } body { margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: #eef1ee; }
+  header { background: var(--dark); color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header b { font-size: 17px; } header small { opacity: .7; } header .sp { flex: 1; }
+  header a { color: #fff; background: rgba(255,255,255,.14); border-radius: 8px; padding: 7px 12px; font-weight: 600; text-decoration: none; }
+  nav.tabs { background: var(--dark); display: flex; gap: 4px; padding: 0 20px; flex-wrap: wrap; }
+  nav.tabs button { background: none; border: 0; color: #b7c7bc; font: inherit; font-weight: 600; padding: 11px 16px; cursor: pointer; border-bottom: 3px solid transparent; }
+  nav.tabs button.on { color: #fff; border-bottom-color: var(--light); }
+  main { max-width: 1100px; margin: 0 auto; padding: 18px 20px 50px; }
+  h1 { margin: 0 0 4px; font-size: 22px; } .lead { margin: 0 0 14px; color: #334155; max-width: 800px; }
+  .tools { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; } .tools input { flex: 1; min-width: 220px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+  .tools button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer; } .tools button.on { background: var(--dark); color: #fff; border-color: var(--dark); }
+  section { background: #fff; border-radius: 12px; padding: 14px 16px; margin: 0 0 14px; } section h2 { margin: 0 0 2px; font-size: 16px; } section > p { margin: 0 0 8px; color: var(--muted); }
+  h3 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .row { display: grid; grid-template-columns: 38px 1fr auto; gap: 4px 12px; padding: 9px 0; border-top: 1px solid var(--line); align-items: start; }
+  .row .id { color: var(--muted); font-weight: 700; font-size: 12px; padding-top: 2px; } .row b { display: block; } .row p { margin: 2px 0 0; color: #334155; } .row small { display: block; color: var(--muted); margin-top: 3px; }
+  .row .note { color: #92400e; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 300px; }
+  .chip { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+  .mvp { background: #dcfce7; color: #166534; } .p2 { background: #dbeafe; color: #1e40af; } .p3 { background: #ede9fe; color: #5b21b6; } .later { background: #f1f5f9; color: #475569; } .cand { background: #fef3c7; color: #92400e; }
+  .built { background: #fff; color: #166534; border: 1px solid #86efac; } .sim { background: #fff; color: #075985; border: 1px solid #7dd3fc; } .blocked { background: #fff; color: #92400e; border: 1px solid #fcd34d; } .no { background: #fff; color: #475569; border: 1px solid #cbd5e1; }
+  .counts { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; } .counts div { background: #fff; border-radius: 12px; padding: 10px 14px; min-width: 150px; } .counts b { font-size: 22px; display: block; }
+  .oq li { margin: 0 0 8px; } .oq small { display: block; color: var(--muted); }
+  .empty { color: var(--muted); padding: 10px 0; }
+  @media (max-width: 640px) { .row { grid-template-columns: 30px 1fr; } .chips { grid-column: 2; justify-content: flex-start; } }
+</style>
+</head>
+<body>
+<header><b>FieldSync Collect</b><small>what people asked for, and where each ask lands</small><span class="sp"></span><a href="index.html">Prototype by phase ↗</a></header>
+<nav class="tabs" id="tabs"></nav>
+<main id="main"></main>
+<script type="module">
+import { FEATURES, PLACES, SIDES, OPEN_QUESTIONS } from './src/features.js';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const PROTO = { built: 'Built in prototype', sim: 'Simulated', blocked: 'Blocked', no: 'Not in prototype' };
+const TABS = [['all', 'All suggested features'], ['mvp', 'MVP (standalone)'], ['post', 'Post-MVP (standalone)'], ['phase', 'By phase']];
+let tab = (location.hash.match(/tab=(\w+)/) || [])[1] || 'all', q = '', only = '';
+
+const row = (f, { showPlace = false } = {}) => `<div class="row"><span class="id">${f.id}</span>
+  <div><b>${esc(f.title)}</b>${f.detail ? `<p>${esc(f.detail)}</p>` : ''}<small>Asked for in: ${esc(f.src)}</small>${f.note ? `<small class="note">${esc(f.note)}</small>` : ''}</div>
+  <div class="chips">${showPlace ? `<span class="chip ${PLACES[f.place].tone}">${PLACES[f.place].label}</span>` : ''}<span class="chip ${f.proto}">${PROTO[f.proto]}</span></div></div>`;
+
+const grouped = (list, opts) => {
+  const groups = [...new Set(list.map((f) => f.group))];
+  return groups.map((g) => `<h3>${esc(g)}</h3>${list.filter((f) => f.group === g).map((f) => row(f, opts)).join('')}`).join('') || '<div class="empty">Nothing matches.</div>';
+};
+const sec = (place, list, opts) => list.length ? `<section><h2>${PLACES[place].label}</h2><p>${PLACES[place].blurb}</p>${grouped(list, opts)}</section>` : '';
+const inPlace = (...ps) => FEATURES.filter((f) => ps.includes(f.place));
+const matches = (f) => (!only || f.place === only) && (!q || `${f.id} ${f.title} ${f.detail} ${f.src} ${f.group}`.toLowerCase().includes(q));
+const counts = () => `<div class="counts">${Object.entries(PLACES).map(([k, p]) => `<div><b>${FEATURES.filter((f) => f.place === k).length}</b>${p.label}</div>`).join('')}</div>`;
+
+function render() {
+  $('tabs').replaceChildren(...TABS.map(([id, label]) => Object.assign(document.createElement('button'), { className: id === tab ? 'on' : '', textContent: label, onclick: () => { tab = id; location.hash = `tab=${id}`; render(); } })));
+  let html = '';
+  if (tab === 'all') {
+    html = `<h1>All suggested features</h1><p class="lead">Everything anyone has asked for, from the Survey123 pain points, both feedback sessions, the plan and the prototype reviews. <b>Only the MVP rows are commitments.</b> Everything else is a candidate for a later phase until it is decided.</p>${counts()}
+      <div class="tools"><input id="q" placeholder="Search features…" value="${esc(q)}"><button data-p="" class="${only ? '' : 'on'}">All</button>${Object.entries(PLACES).map(([k, p]) => `<button data-p="${k}" class="${only === k ? 'on' : ''}">${p.label}</button>`).join('')}</div>
+      <section>${grouped(FEATURES.filter(matches), { showPlace: true }) }</section>`;
+  } else if (tab === 'mvp') {
+    html = `<h1>MVP · Phase 1</h1><p class="lead">The app ships with exactly this and nothing else. One person, one phone, no teams. Order of work from the Oct 30 session: <b>baseline app first</b>, then sharing and assignment, then the review layer.</p>
+      <p class="lead"><b>Exit gate:</b> 400 photos delivered on three real phones.</p>${Object.entries(SIDES).map(([k, label]) => { const l = FEATURES.filter((f) => f.place === 'mvp' && f.side === k); return l.length ? `<section><h2>${label} <small style="font-weight:400;color:var(--muted)">${l.length} tasks</small></h2>${l.map((f) => row(f)).join('')}</section>` : ''; }).join('')}`;
+  } else if (tab === 'post') {
+    html = `<h1>Post-MVP</h1><p class="lead">Standalone from the MVP: none of this is needed for the MVP to work, and each layer only adds to the one before it.</p>
+      ${sec('p2', inPlace('p2'))}${sec('p3', inPlace('p3'))}${sec('cand', inPlace('cand'))}${sec('later', inPlace('later'))}
+      <section><h2>Open questions that decide where review lands</h2><p>From the Oct 30 session. Lucy takes these to the planning meeting in the week of Nov 2.</p><ol class="oq">${OPEN_QUESTIONS.map(([a, b]) => `<li><b>${esc(a)}</b><small>${esc(b)}</small></li>`).join('')}</ol></section>`;
+  } else {
+    const keys = ['mvp', 'p2', 'p3'];
+    html = `<h1>Features by phase</h1><p class="lead">Each phase lists what <i>it adds</i>; a phase includes everything before it.</p>
+      ${keys.map((k, i) => `<section><h2>${PLACES[k].label}${i ? ` <small style="font-weight:400;color:var(--muted)">adds ${FEATURES.filter((f) => f.place === k).length}</small>` : ` <small style="font-weight:400;color:var(--muted)">${FEATURES.filter((f) => f.place === k).length} features</small>`}</h2><p>${PLACES[k].blurb}</p>${FEATURES.filter((f) => f.place === k).map((f) => `<div class="row"><span class="id">${f.id}</span><div><b>${esc(f.title)}</b></div><div class="chips"><span class="chip ${f.proto}">${PROTO[f.proto]}</span></div></div>`).join('')}</section>`).join('')}
+      <section><h2>Not in any phase yet</h2><p>Candidates and later ideas.</p>${FEATURES.filter((f) => f.place === 'cand' || f.place === 'later').map((f) => `<div class="row"><span class="id">${f.id}</span><div><b>${esc(f.title)}</b></div><div class="chips"><span class="chip ${PLACES[f.place].tone}">${PLACES[f.place].label}</span></div></div>`).join('')}</section>`;
+  }
+  $('main').innerHTML = html;
+  const qi = $('q'); if (qi) { qi.oninput = () => { q = qi.value.toLowerCase(); const pos = qi.selectionStart; render(); const n = $('q'); n.focus(); n.setSelectionRange(pos, pos); }; }
+  $('main').querySelectorAll('.tools button').forEach((b) => { b.onclick = () => { only = b.dataset.p; render(); }; });
+}
+render();
+</script>
+</body>
+</html>

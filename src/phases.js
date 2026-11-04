@@ -13,7 +13,7 @@ export const FEATURE_PHASE = {
   notify: 2,         // error reports that also notify the foreman or PM
   crash: 2,          // crash reporting
   camera: 1,         // in-app camera popup: zoom steps, rapid-fire (simulated here; native camera API in the real build)
-  quality: 2,        // original photo quality (no re-encode)
+  quality: 1,        // original photo quality (no re-encode): the Oct 30 session reconfirmed "no photo degradation" as baseline
   photofirst: 2,     // photo-first capture exploration
   calcs: 2,          // field calculations (guy facilities)
   // Later
@@ -46,6 +46,7 @@ export const PHASES = [
       ['Sync log, health screen, one-tap send to dev team', 'built', 'Reports queue offline; the log is attached automatically.'],
       ['Form version lock + backend with dedupe', 'built', 'Old forms are rejected with ERR-SYNC-001; duplicates are counted, not stored.'],
       ['Camera popup with zoom steps and quick-fix for failed photos', 'sim', 'Simulated camera (0.5× · 1× · 2× · 10×), shutter, photo added. A failed send has “Go to the problem” → the flagged photo → Replace.'],
+      ['Original photo quality (no re-encode) and burst shooting', 'built', 'Health → Photo quality: Optimized (small) or Original (as the camera wrote it). Burst takes 5 photos in one tap.'],
       ['Status-first opening screen + survey library', 'built', 'Saved state, resume card, tiles grouped by scope of work.'],
       ['Real-phone test on three devices', 'no', 'Web prototype only: proves the logic, not iOS/Android background upload or real-phone performance.'],
     ],
@@ -79,8 +80,7 @@ export const PHASES = [
       ['Per-contributor attribution', 'built', 'Every answer, repeat entry and photo is credited to the person who captured it.'],
       ['Error reports that also notify the foreman or PM', 'built', 'Health → “Notify my foreman”. It shows up in the foreman’s app.'],
       ['Crash reporting', 'built', 'Uncaught errors file themselves (with the log) to the dev team.'],
-      ['Native camera: real 0.5× lens and native quality', 'sim', 'The popup is shared with Phase 1; the native build calls the phone camera API directly (all lenses). Original-quality mode skips re-encoding.'],
-      ['Photo-first capture (open UX question)', 'sim', 'Shoot freely, sort into survey sections after. Built to compare with form-first.'],
+            ['Photo-first capture (open UX question)', 'sim', 'Shoot freely, sort into survey sections after. Built to compare with form-first.'],
       ['Field calculations (guy facilities)', 'blocked', 'Engine works. The equations and test cases are still to be written — the demo survey uses a placeholder formula.'],
       ['Site data package', 'no', 'Needs the web app’s site data.'],
       ['Web app view of Collect records', 'sim', 'The dev-team page shows every record, who contributed what, photos and status.'],

@@ -13,6 +13,7 @@ npm start              # starts the server and prints the URLs below
 
 | URL | What |
 |---|---|
+| `http://localhost:8123/features.html` | **Every requested feature and where it lands**: all suggested features, MVP (standalone), post-MVP (standalone), by phase. |
 | `http://localhost:8123/` | **Prototype by phase**: one tab per build phase (Phase 1 reliability, Phase 2 team-ready, Later), each with its own phones, a feature checklist and a "try this" script. Per-phone network switch and "kill app". |
 | `http://localhost:8123/app.html` | The app itself — open this on a real phone (same Wi-Fi) using the LAN address `npm start` prints. |
 | `http://localhost:8123/admin.html` | Dev-team console: problem reports with logs, records and photos, team surveys, stats. |
