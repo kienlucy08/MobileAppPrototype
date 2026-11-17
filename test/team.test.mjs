@@ -40,7 +40,7 @@ await until(() => doc.created);
 await test('a record is only on the lists of the people it is shared with; a PM sees every site', async () => {
   assert.equal((await sam.srv.listShared()).length, 0, 'Sam is not on it yet');
   assert.equal((await priya.srv.listShared()).length, 1, 'PM sees all sites');
-  assert.deepEqual((await sam.srv.team()).map((t) => t.email).sort(), ['dana@demo.test', 'maria@demo.test']);
+  assert.deepEqual((await sam.srv.team()).map((t) => t.email).sort(), ['dana@demo.test', 'jordan@demo.test', 'maria@demo.test']);
 });
 
 await test('crew lead shares it; Sam joins; a crew member cannot share or reassign (ERR-AUTH-004)', async () => {

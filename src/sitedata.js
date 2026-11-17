@@ -12,22 +12,39 @@ export const STRUCTURE_SURVEY = 'demo-fs-structure-climb-inspection';
 const norm = (s) => String(s ?? '').trim().toLowerCase();
 
 export class SiteData {
-  constructor({ server, engine, storageKey, retryMs = 5000 }) {
-    this.staleMs = 30000; this.server = server; this.engine = engine; this.storageKey = storageKey; this.retryMs = retryMs;
+  constructor({ server, engine, storageKey, retryMs = 5000, structureId = STRUCTURE_SURVEY }) {
+    this.structureId = structureId; this.staleMs = 30000; this.server = server; this.engine = engine; this.storageKey = storageKey; this.retryMs = retryMs;
     this.listeners = new Set(); this.pending = new Map();
     try { this.cache = JSON.parse(localStorage.getItem(storageKey)) || {}; } catch { this.cache = {}; }
   }
   install() { CTX.site = { level: (site, level) => this.level(site, level) }; }
   onResolve(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
 
+  /** Every other survey answered for this site: on this phone first (newest first), then what the server already holds. Used to fill repeated information. */
+  records(site, exceptSub) {
+    const key = norm(site); if (!key) return [];
+    const local = [...this.engine.subs.values()].filter((s) => !s.shared && s.id !== exceptSub && norm(s.answers?.siteId) === key)
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).map((s) => ({ title: s.surveyTitle || this.titleOf?.(s.surveyId) || 'another survey', surveyId: s.surveyId, answers: s.answers, from: 'this phone' }));
+    const c = this.cache[key];
+    if (!c || Date.now() - c.at > this.staleMs) this._fetch(key);
+    const have = new Set(local.map((r) => r.surveyId));
+    const server = Object.entries(c?.data || {}).filter(([id]) => !have.has(id)).map(([id, answers]) => ({ title: this.titleOf?.(id) || id, surveyId: id, answers, from: 'the server' }));
+    return [...local, ...server];
+  }
+  /** The newest non-empty answer to a field of the same name in another survey for this site, with where it came from. */
+  pull(site, name, exceptSub) {
+    for (const r of this.records(site, exceptSub)) { const v = r.answers?.[name]; if (v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length) && typeof v !== 'object') return { value: v, title: r.title, from: r.from }; }
+    return null;
+  }
+
   /** Structure-survey answers for a site, and where they came from. */
   structure(site) {
     const key = norm(site); if (!key) return undefined;
-    const local = [...this.engine.subs.values()].filter((s) => s.surveyId === STRUCTURE_SURVEY && norm(s.answers?.siteId) === key && (s.answers?.guyLevels || []).length)
+    const local = [...this.engine.subs.values()].filter((s) => s.surveyId === this.structureId && norm(s.answers?.siteId) === key && (s.answers?.guyLevels || []).length)
       .sort((a, b) => (b.status === 'draft') - (a.status === 'draft') || b.updatedAt - a.updatedAt);   // a submitted record beats a draft
     const sub = local.find((s) => s.status !== 'draft') || local[0];
     if (sub) return { answers: sub.answers, from: sub.status === 'draft' ? 'this phone (not finished)' : 'this phone' };
-    const c = this.cache[key], hit = c?.data?.[STRUCTURE_SURVEY];
+    const c = this.cache[key], hit = c?.data?.[this.structureId];
     if (!c || Date.now() - c.at > this.staleMs) this._fetch(key);          // never fetched, or old: ask again in the background
     return hit ? { answers: hit, from: 'server' } : undefined;
   }
@@ -40,7 +57,7 @@ export class SiteData {
       const data = await withFaults(this.server, 1500, () => this.server.siteData(key));
       this.cache[key] = { at: Date.now(), data }; this.pending.delete(key);
       try { localStorage.setItem(this.storageKey, JSON.stringify(this.cache)); } catch { /* ignore */ }
-      if (data?.[STRUCTURE_SURVEY]) this.listeners.forEach((cb) => cb());
+      if (data && Object.keys(data).length) this.listeners.forEach((cb) => cb());
     } catch {
       p.timer = setTimeout(() => { this.pending.delete(key); this._fetch(key); }, this.retryMs / (this.server.scale || 1));   // offline: keep trying quietly
     }

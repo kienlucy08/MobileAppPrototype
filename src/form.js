@@ -3,6 +3,7 @@ import { setChoices, CTX } from './expr.js';
 import * as S from './schema.js';
 import { addImages } from './images.js';
 import { openCamera } from './capture.js';
+import { buildSteps, wireNumber } from './guidesteps.js';
 import { attribution } from './crdt.js';
 import { describe } from './errors.js';
 import { icon } from './icons.js';
@@ -83,17 +84,19 @@ export function teamPanel(ctx, sub) {
 // =================================================================================================
 // Form renderer: JSON in → paged, live-validated form out. Works on a private draft or a shared record.
 // =================================================================================================
-export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, onReview }) {
+export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, onReview, ingress = false, onFinish, onCopy, visitNav, subtitle = '', status = '', banner = '' }) {
+  const ing = !!ingress;
   const shared = sub.shared ? ctx.collab : null;
   const survey = surveyOf(ctx, sub);
   setChoices(survey);
   const pages = survey.pages.filter(hasVisible);
   let page = Math.max(0, pages.indexOf(survey.pages[Math.min(startPage, survey.pages.length - 1)]));
-  let wrappers = [], pendingRemote = null;
+  let wrappers = [], pendingRemote = null, building = false;       // `building`: a repeat refreshes itself while its page is still being built; that must not drop the fields built so far
   const cleanups = [];
 
   if (shared) { sub.answers = shared.open(sub.id); S.recalc(survey, sub.answers); }
 
+  if (ing) sub.checked ||= {};
   const body = h('div', { class: 'scroll form-body' });
   const title = h('div', { class: 'ab-title' });
   const bar = h('div', { class: 'progress' }, h('i'));
@@ -108,6 +111,8 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     bar, ctx.has('photofirst') && ctx.openPhotoFirst ? h('div', { class: 'form-tools' }, h('button', { type: 'button', class: 'btn small ghost', onclick: () => { saveNow(); ctx.openPhotoFirst(sub); } }, icon('image', 15), 'Photo-first: shoot now, sort later')) : null, team ? team.el : null, body,
     h('footer', { class: 'formnav' }, back, dots, next));
   root.cleanup = () => { cleanups.forEach((f) => f()); };
+  const ingRoot = ing ? buildIngress() : null;
+  if (ing) { ingRoot.cleanup = root.cleanup; }
 
   const saveNow = () => {
     sub.page = survey.pages.indexOf(pages[page]); sub.updatedAt = Date.now();
@@ -116,12 +121,33 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
   };
   const save = debounce(saveNow, 400);
   const changed = () => {
+    const moved = pullAll();
     S.recalc(survey, sub.answers); refresh();
+    if (moved) { if (typingNow()) pendingRedraw = true; else redrawKeep(); }
     if (shared) shared.localChanged(sub.id, sub.answers); else save();
   };
+  // ---- fill repeated information from other surveys of the same site, and say so ---------------------
+  const pulled = (sub.pulled ||= {});
+  const typingNow = () => body.contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  let pendingRedraw = false;
+  /** Fields marked `pull` fill themselves from another survey for the same site. Only fields that are empty, or still hold what was filled in, are touched: what the crew typed is never overwritten. */
+  const pullAll = () => {
+    if (!ctx.pullFor) return false; let any = false;
+    for (const pg of survey.pages) for (const f of pg.fields) {
+      if (!f.pull) continue;
+      const cur = sub.answers[f.name], p = pulled[f.name];
+      if (!(S.isEmpty(cur) || (p && String(p.value) === String(cur)))) continue;
+      const src = ctx.pullFor(sub.answers.siteId, f.name, sub.id);
+      if (src && String(src.value) !== String(cur ?? '')) { sub.answers[f.name] = f.type === 'integer' || f.type === 'decimal' ? Number(src.value) : src.value; pulled[f.name] = { value: sub.answers[f.name], from: src.from }; any = true; }
+      else if (!src && p) { delete sub.answers[f.name]; delete pulled[f.name]; any = true; }
+    }
+    return any;
+  };
+  const redrawKeep = () => { const keep = body.scrollTop; draw(); body.scrollTop = keep; };
   const refresh = () => {
-    wrappers = wrappers.filter((w) => body.contains(w.el));
-    for (const w of wrappers) { w.el.hidden = !w.visible(); w.relabel?.(); w.sync?.(); }
+    if (!building) wrappers = wrappers.filter((w) => body.contains(w.el));
+    for (const w of wrappers) { w.el.hidden = !w.visible(); w.relabel?.(); w.sync?.(); w.status?.(); w.pull?.(); }
+    if (ing) updateIngress();
   };
   if (ctx.siteData) cleanups.push(ctx.siteData.onResolve(() => changed()));       // structure-survey values arrived for this site
   if (ctx.lookups) cleanups.push(ctx.lookups.onResolve(() => changed()));       // weather / member lookup finished (possibly after being offline)
@@ -161,9 +187,19 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
   function draw() {
     const pg = pages[page];
     wrappers = [];
+    if (ing) {
+      building = true; body.replaceChildren(...pg.fields.map((f) => fieldEl(f, sub.answers, '')).filter(Boolean)); building = false;
+      refresh();
+      if (focusPath) {
+        const el = body.querySelector(`[data-path="${CSS.escape(focusPath)}"]`);
+        focusPath = null;
+        if (el) requestAnimationFrame(() => { el.scrollIntoView({ block: 'center' }); el.classList.add('pulse'); });
+      }
+      return;
+    }
     title.replaceChildren(h('b', {}, survey.title), h('small', {}, `${stripHtml(pg.label || pg.name)} · ${page + 1} of ${pages.length}`));
     bar.firstChild.style.width = `${((page + 1) / pages.length) * 100}%`;
-    body.replaceChildren(...pg.fields.map((f) => fieldEl(f, sub.answers, '')).filter(Boolean));
+    building = true; body.replaceChildren(...pg.fields.map((f) => fieldEl(f, sub.answers, '')).filter(Boolean)); building = false;
     back.disabled = page === 0;
     next.textContent = page === pages.length - 1 ? 'Review' : 'Next';
     dots.replaceChildren(...pages.map((_, i) => h('i', { class: i === page ? 'on' : '' })));
@@ -180,10 +216,11 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     if (f.type === 'calculate' || f.appearance === 'hidden') return null;    // never rendered
     const path = prefix + f.name;
     const wrap = h('section', { class: 'field', 'data-path': path });
-    const entry = { el: wrap, visible: () => S.isRelevant(f, S.scopeOf(sub.answers, item, f.name)) };
+    const entry = { el: wrap, f, visible: () => S.isRelevant(f, S.scopeOf(sub.answers, item, f.name)) };
     wrappers.push(entry);
     const dynamic = (t) => /\$\{/.test(t || '');
 
+    if (f.type === 'note' && f.guidedFor) { wrap.append(guidedCard(f)); return wrap; }
     if (f.type === 'note') {
       const box = h('div', { class: 'note-html' + (/reminder|warning/i.test(f.name) ? ' warn' : '') });
       const draw = () => box.replaceChildren(htmlFragment(interp(f.label, item, sub.answers)));
@@ -195,6 +232,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     const err = h('div', { class: 'inline-err', role: 'alert' });
     const set = (v) => {
       item[f.name] = v;
+      if (ing && item[f.name + '__state'] && !S.isEmpty(v)) { delete item[f.name + '__state']; wrap.classList.remove('na'); }
       const scope = S.scopeOf(sub.answers, item, f.name);
       const issue = S.isEmpty(v) ? null : S.fieldIssues(f, v, scope)[0];   // live: required errors wait for review
       err.textContent = issue ? issue.message : '';
@@ -215,12 +253,70 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
       hint,
       controls[f.type](f, item, set, path),
       err,
+      f.pull && !prefix ? pullNoteEl(f, entry) : null,
+      ing && !prefix ? ingFooter(f, item, path, wrap, entry, set) : null,
     ].filter(Boolean));
     return wrap;
   }
 
+  // ---- guided photos (guy facilities) ------------------------------------------------------------
+  /** What the camera tells the crew to shoot for this slot, so the photo links to the right wire. */
+  function photoTip(f, item, path) {
+    if (f.tip) return f.tip;
+    if (!f.slot) return '';
+    const m = /^(wires\w)\[\d+\]\./.exec(path), arr = m ? sub.answers[m[1]] : null;
+    if (!arr) return `Take a photo of the ${f.slot}`;
+    const level = item.level ?? arr.indexOf(item) + 1;
+    return `Take a photo of guy level ${level} wire ${wireNumber(arr, item)} ${f.slot}`;
+  }
+  function guidedCard(f) {
+    const c = f.guidedFor; let mode = sub.guideMode || 'wire';
+    const card = h('div', { class: 'guided-card' });
+    const start = () => {
+      sub.guideMode = mode;
+      const steps = buildSteps({ c, answers: sub.answers, mode });
+      if (!(sub.answers[`wires${c}`] || []).length) ctx.toast('Add the levels and wires first: the camera prompts a photo for each one. Anchor photos can start now.', 5000);
+      const C = c.toUpperCase();
+      const info = (st) => st.target.kind === 'anchor' ? { item: sub.answers, field: st.target.field, path: st.target.field, match: `_anchor${C}_${st.target.slot}` }
+        : (() => { const arr = sub.answers[`wires${c}`] || [], i = arr.findIndex((w) => w._id === st.target.itemId); return { item: arr[i] || {}, field: st.target.field, path: `wires${c}[${i}].${st.target.field}`, match: null }; })();
+      // a wire's slot holds that wire's photos; an anchor slot is found by its file name
+      const idsFor = (t) => (t.item[t.field] || []).filter((id) => !t.match || (ctx.engine.media.get(id)?.name || '').includes(t.match));
+      const guide = { steps, startAt: 0,
+        isDone: (i) => idsFor(info(steps[i])).length > 0,
+        thumb: (i) => ctx.engine.media.get(idsFor(info(steps[i]))[0])?.thumb,
+        clear: async (i) => { const t = info(steps[i]); for (const id of idsFor(t)) { await ctx.engine.removeMedia(id); t.item[t.field] = (t.item[t.field] || []).filter((x) => x !== id); } changed(); },
+        assign: async (i, file) => {
+          const t = info(steps[i]), n = idsFor(t).length;          // more photos for the same slot are added, never replaced
+          const named = n ? new File([file], file.name.replace(/\.jpg$/, `_${n + 1}.jpg`), { type: 'image/jpeg', lastModified: Date.now() }) : file;
+          const r = await addImages(ctx.engine, sub, t.path, [named], { original: ctx.settings?.original });
+          for (const e of r.errors) ctx.toast(`${e.code}: ${e.detail}`, 6000);
+          (t.item[t.field] ||= []).push(...r.ids); changed();
+        } };
+      openCamera({ container: document.querySelector('.device') || document.body, title: 'Guided photos', onShot: () => {}, guide, onClose: () => redrawKeep() });
+    };
+    const draw = () => card.replaceChildren(h('b', {}, icon('camera', 16), ` Guided photos · Compound ${c.toUpperCase()}`),
+      h('small', {}, 'Enter the levels and wires first. The camera then tells you what to shoot, for example “Take a photo of guy level 1 wire 1 dead end group”, and files each photo against that wire. Every slot takes several photos.'),
+      h('div', { class: 'seg mini' }, [['wire', 'Wire by wire'], ['tool', 'One tool at a time']].map(([k, l]) => h('button', { type: 'button', class: mode === k ? 'on' : '', onclick: () => { mode = k; draw(); } }, l))),
+      h('small', { class: 'muted' }, mode === 'wire' ? 'Level 1 wire 1: dead end group, color, tension. Then the next wire.' : 'Every dead end group, then every color, then every tension.'),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onclick: start }, 'Start guided photos')));
+    draw(); return card;
+  }
+  function pullNoteEl(f, entry) {
+    const el = h('div', { class: 'pull-note' });
+    entry.pull = () => { const p = pulled[f.name], on = !!p && String(p.value) === String(sub.answers[f.name]); el.hidden = !on; if (on) el.replaceChildren(icon('link', 12), `Filled in from ${p.from}`); };
+    entry.pull(); return el;
+  }
+  body.addEventListener('focusout', () => setTimeout(() => { if (pendingRedraw && !typingNow()) { pendingRedraw = false; redrawKeep(); } }, 60));
+  const lookupShows = [], entryOf = (n) => wrappers.find((w) => w.f?.name === n);
+  if (ing) cleanups.push(ctx.server && ctx.lookups ? ctx.lookups.onResolve(() => lookupShows.forEach((f) => f())) : () => {});
   const controls = {
     text(f, item, set) {
+      if (f.appearance === 'lookup') {                                                // a looked-up value: Pending until service returns, never blocks
+        const out = h('div', { class: 'lookup' });
+        const show = () => { const v = item[f.name]; out.className = 'lookup ' + (v ? 'done' : 'pending'); out.replaceChildren(h('span', { class: 'pill ' + (v ? 'complete' : 'blocked') }, v ? 'Done' : 'Pending'), h('span', {}, v || (ctx.server.profile?.offline ? 'Waiting for signal' : 'Looking up…'))); };
+        show(); (entryOf(f.name) || {}).sync = show; lookupShows.push(show);
+        return out;
+      }
       const max = f.maxLength ?? 255, val = item[f.name] ?? '';
       const input = h(f.appearance === 'multiline' ? 'textarea' : 'input', { class: 'input', maxlength: max, rows: 3, type: 'text' });
       input.value = val;
@@ -418,11 +514,11 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
 
     const cam = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: (e) => { ingest(e.target.files); e.target.value = ''; } });
     const gal = h('input', { type: 'file', accept: 'image/*', multiple: f.maxFiles !== 1, hidden: true, onchange: (e) => { ingest(e.target.files); e.target.value = ''; } });
-    const openCam = () => (ctx.has('camera') ? openCamera({ container: document.querySelector('.device') || document.body, defaultZoom: f.defaultZoom ?? 1, title: f.label || 'Camera', onShot: (file) => ingest([file]), fallbackInput: cam }) : cam.click());
+    const openCam = () => (ctx.has('camera') ? openCamera({ container: document.querySelector('.device') || document.body, defaultZoom: f.defaultZoom ?? 1, title: f.label || 'Camera', onShot: (file) => ingest([file]), fallbackInput: cam, multi: ing, tip: photoTip(f, item, path) }) : cam.click());
     const mode = f.appearance || 'both';
     const buttons = h('div', { class: 'row' },
       mode !== 'gallery' ? h('button', { type: 'button', class: 'btn small primary', onclick: openCam }, icon('camera'), 'Camera') : null,
-      mode !== 'camera' ? h('button', { type: 'button', class: 'btn small', onclick: () => gal.click() }, icon('image'), 'Gallery / files') : null);
+      mode !== 'camera' && ctx.allow?.('gallery') !== false ? h('button', { type: 'button', class: 'btn small', onclick: () => gal.click() }, icon('image'), 'Gallery / files') : null);
     draw();
     return h('div', { class: 'imagefield' }, counter, buttons, cam, gal, prog, notes, grid);
   }
@@ -469,13 +565,19 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     while (f.repeatCount && arr.length < f.repeatCount) { const it = { _id: newId() }; S.applyDefaults(f.fields, it, ctx.device); arr.push(it); }
     arr.forEach((it) => { it._id ||= newId(); });
     const fixed = !!f.repeatCount;
+    const carries = f.fields.filter((x) => x.carry);
+    /** A new entry starts from the last one: wire size, strands and preform color carry over, and the level counts up, so the crew does not retype about twelve levels. */
+    const newEntry = () => { const it = { _id: newId() }; S.applyDefaults(f.fields, it, ctx.device); const last = arr[arr.length - 1];
+      if (last) for (const sf of f.fields) { if (sf.carry && last[sf.name] !== undefined) it[sf.name] = structuredClone(last[sf.name]); if (sf.increment && Number.isFinite(Number(last[sf.name]))) it[sf.name] = Number(last[sf.name]) + 1; }
+      return it; };
+    const fillOthers = (from) => { let n = 0; for (const o of arr) if (o !== from) for (const sf of carries) if (S.isEmpty(o[sf.name]) && !S.isEmpty(from[sf.name])) { o[sf.name] = structuredClone(from[sf.name]); n++; } ctx.toast(n ? `Filled ${n} blank value${n === 1 ? '' : 's'} on the other levels.` : 'The other levels already have values.'); changed(); draw(); };
     const list = h('div', { class: 'repeat' });
     const draw = () => {
       list.replaceChildren(...arr.map((it, i) => {
         const p = `${path}[${i}].`;
         const kids = f.fields.map((nf) => fieldEl(nf.type === 'image' ? { ...nf } : nf, it, p)).filter(Boolean);
-        return h('div', { class: 'rcard', 'data-path': `${path}/${it._id}` },
-          h('div', { class: 'rhead' }, h('b', {}, `${stripHtml(f.label || f.name)} ${i + 1}`), h('span', { class: 'grow' }),
+        return h('div', { class: 'rcard' + (f.appearance === 'cards-grid' ? ' grid' : ''), 'data-path': `${path}/${it._id}` },
+          h('div', { class: 'rhead' }, h('b', {}, `${stripHtml(f.label || f.name)} ${it.level ?? i + 1}${f.numbered ? ` · wire ${wireNumber(arr, it)}` : ''}`), h('span', { class: 'grow' }), carries.length && arr.length > 1 ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => fillOthers(it) }, 'Fill other levels') : null,
             fixed ? null : h('button', { type: 'button', class: 'btn small ghost', onclick: () => { arr.splice(i + 1, 0, cloneItem(f.fields, it)); changed(); draw(); } }, 'Duplicate'),
             fixed ? null : h('button', { type: 'button', class: 'btn small ghost danger', onclick: async () => {
               for (const id of S.mediaIn(f.fields, it)) await ctx.engine.removeMedia(id);
@@ -487,7 +589,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     };
     draw();
     return h('div', {}, h('div', { class: 'lbl' }, htmlFragment(f.label || f.name)), list,
-      fixed ? null : h('button', { type: 'button', class: 'btn add', onclick: () => { const it = { _id: newId() }; S.applyDefaults(f.fields, it, ctx.device); arr.push(it); changed(); draw(); } }, `+ ${stripHtml(f.addLabel || 'Add')}`));
+      fixed ? null : h('button', { type: 'button', class: 'btn add', onclick: () => { arr.push(newEntry()); changed(); draw(); } }, `+ ${stripHtml(f.addLabel || 'Add')}`));
   }
   function cloneItem(fields, it) {
     const c = { _id: newId() };
@@ -499,7 +601,158 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     return c;
   }
 
+
+  // =================================================================================================
+  // Ingress layout: section tabs, a sections drawer, a Previous / Mark all checked / Next section bar, required fields with
+  // N/A or Could not record, per-field checks and a Check survey list. Same fields underneath.
+  // =================================================================================================
+  function sectionName(pg) { return stripHtml(pg.section || pg.label || pg.name); }
+  function sectionList() {
+    const out = [];
+    pages.forEach((pg, i) => { const n = sectionName(pg); let sc = out.find((x) => x.name === n); if (!sc) out.push(sc = { name: n, idx: [] }); sc.idx.push(i); });
+    return out;
+  }
+  /** What can be checked on a page: every visible field, and each repeat entry as one card. */
+  function checkables(pg) {
+    const list = [];
+    const walk = (fields, item, prefix) => {
+      for (const f of fields) {
+        if (f.type === 'calculate' || f.type === 'note' || f.appearance === 'hidden') continue;
+        if (!S.isRelevant(f, S.scopeOf(sub.answers, item, f.name))) continue;
+        const path = prefix + f.name;
+        if (f.type === 'repeat') { (item[f.name] || []).forEach((it, i) => list.push({ path: `${path}[${i}]`, f, item: it, entry: true })); continue; }
+        list.push({ path, f, item });
+      }
+    };
+    walk(pg.fields, sub.answers, '');
+    return list;
+  }
+  const entryAnswered = (c) => c.f.fields.every((f) => f.type === 'calculate' || f.type === 'note' || f.appearance === 'hidden' || !(f.required || f.minFiles > 0) || (f.type === 'image' ? (c.item[f.name] || []).length >= (f.minFiles ?? 1) : (c.item[f.name + '__state'] || !S.isEmpty(c.item[f.name]))));
+  const answeredNow = (c) => c.entry ? entryAnswered(c) : (c.item[c.f.name + '__state'] || (c.f.type === 'image' ? (c.item[c.f.name] || []).length > 0 : !S.isEmpty(c.item[c.f.name])));
+  const pageStats = (i) => { const l = checkables(pages[i]); return { total: l.length, done: l.filter(answeredNow).length }; };
+  const allStats = () => pages.reduce((a, _, i) => { const s2 = pageStats(i); a.total += s2.total; a.done += s2.done; return a; }, { total: 0, done: 0 });
+
+  function checkBtn(path) {
+    const b = h('button', { type: 'button', class: 'chk', 'aria-label': 'Checked', onclick: () => { sub.checked[path] = !sub.checked[path]; b.classList.toggle('on', !!sub.checked[path]); saveNow(); updateIngress(); } }, icon('check', 16));
+    b.classList.toggle('on', !!sub.checked[path]); return b;
+  }
+  function ingFooter(f, item, path, wrap, entry, set) {
+    if (f.type === 'image' && f.appearance === 'signature') return null;
+    const stateKey = f.name + '__state';
+    const pill = h('span', { class: 'ans-pill' }, 'Answered');
+    const chips = f.required && f.type !== 'image' ? [['na', 'N/A'], ['unrecorded', 'Could not record']].map(([k, l]) => {
+      const b = h('button', { type: 'button', class: 'na-chip' + (item[stateKey] === k ? ' on' : ''), onclick: () => {
+        if (item[stateKey] === k) delete item[stateKey]; else { item[stateKey] = k; sub.checked[path] = true; }
+        wrap.classList.toggle('na', !!item[stateKey]); changed(); chips.forEach((x) => x.classList.toggle('on', item[stateKey] === x.dataset.k));
+      } }, l);
+      b.dataset.k = k; return b;
+    }) : [];
+    entry.status = () => {
+      const ok = !!item[stateKey] || (f.type === 'image' ? (item[f.name] || []).length > 0 : !S.isEmpty(item[f.name]));
+      pill.hidden = !ok;
+      wrap.classList.toggle('na', !!item[stateKey]);
+    };
+    return h('div', { class: 'ing-foot' }, ...chips, h('span', { class: 'grow' }), pill);
+  }
+
+  function issuesNow() {
+    const fieldAt = (path) => {
+      const nm = path.replace(/\[\d+\]\./g, '.').split('.').pop();
+      let hit = null;
+      const walk = (fields) => fields.forEach((f) => { if (f.name === nm) hit = f; if (f.fields) walk(f.fields); });
+      survey.pages.forEach((p) => walk(p.fields)); return hit;
+    };
+    return S.validate(survey, sub.answers).map((is) => {
+      const f = fieldAt(is.path), label = stripHtml(f?.label || is.path);
+      const kind = is.code === 'ERR-IMG-003' ? 'photo' : 'field';
+      const title = kind === 'photo' ? (/^\S.*: 0 of/.test(is.message) ? `${label} has no photo` : `${label}: ${is.message.replace(/^.*?: /, '')}`) : is.code === 'ERR-FIELD-001' ? `${label} is blank` : is.message;
+      const pg = survey.pages[is.pageIdx];
+      return { ...is, kind, title, where: `${sectionName(pg)} · ${stripHtml(pg.label || pg.name)}`, pageIdx: pages.indexOf(pg) };
+    });
+  }
+  function openCheck() {
+    const list = issuesNow(), nField = list.filter((x) => x.kind === 'field').length, nPhoto = list.filter((x) => x.kind === 'photo').length;
+    const goto = (is) => { close(); page = Math.max(0, is.pageIdx); focusPath = is.path; saveNow(); draw(); };
+    const close = ctx.sheet('Check survey',
+      h('p', { class: 'muted' }, list.length ? `${list.length} thing${list.length === 1 ? '' : 's'} to fix before you submit` : 'Everything required is answered.'),
+      h('div', { class: 'chips' }, nField ? h('span', { class: 'pill blocked' }, `${nField} missing field${nField === 1 ? '' : 's'}`) : null, nPhoto ? h('span', { class: 'pill err' }, `${nPhoto} missing photo${nPhoto === 1 ? '' : 's'}`) : null),
+      ...list.slice(0, 4).map((is) => h('button', { type: 'button', class: 'check-row', onclick: () => goto(is) }, h('div', {}, h('b', {}, is.title), h('small', { class: 'muted block' }, is.where)), h('span', { class: 'link' }, 'Go to'))),
+      list.length > 4 ? h('small', { class: 'muted' }, `+ ${list.length - 4} more`) : null,
+      list.length ? h('button', { type: 'button', class: 'btn primary big', onclick: () => goto(list[0]) }, 'Fix next issue') : h('button', { type: 'button', class: 'btn primary big', onclick: () => { close(); onFinish?.(); } }, 'Finish'),
+      h('small', { class: 'muted center' }, 'Submit stays off until the check passes (to decide)'));
+  }
+  function openDrawer() {
+    const secs = sectionList(), here = sectionName(pages[page]);
+    const filter = h('input', { class: 'input', placeholder: 'Filter sections…', 'aria-label': 'Filter sections' });
+    const list = h('div', { class: 'drawer-list' });
+    const close = () => { dr.remove(); };
+    const draw2 = () => {
+      const q = filter.value.trim().toLowerCase();
+      list.replaceChildren(...secs.filter((sc) => !q || sc.name.toLowerCase().includes(q)).map((sc) => {
+        const st = sc.idx.reduce((a, i) => { const x = pageStats(i); a.total += x.total; a.done += x.done; return a; }, { total: 0, done: 0 });
+        return h('div', { class: 'drawer-sec' + (sc.name === here ? ' on' : '') },
+          h('button', { type: 'button', class: 'drawer-row', onclick: () => { page = sc.idx[0]; close(); saveNow(); draw(); } }, h('b', {}, sc.name), h('span', { class: 'count' }, st.total),
+            st.total ? h('small', { class: 'muted block' }, `${st.done}/${st.total} answered`) : null, st.total ? h('div', { class: 'bar' }, h('i', { style: `width:${(st.done / st.total) * 100}%` })) : null),
+          sc.name === here && sc.idx.length > 1 ? h('div', { class: 'drawer-sub' }, sc.idx.map((i) => h('button', { type: 'button', class: i === page ? 'on' : '', onclick: () => { page = i; close(); saveNow(); draw(); } }, stripHtml(pages[i].label || pages[i].name)))) : null);
+      }));
+    };
+    filter.addEventListener('input', draw2); draw2();
+    const vn = visitNav?.();
+    const dr = h('div', { class: 'drawer-wrap' }, h('div', { class: 'drawer' }, vn ? h('div', { class: 'vnav' }, h('h3', { class: 'drawer-title' }, 'Surveys in this visit'), h('small', { class: 'muted' }, vn.title), ...vn.rows.map((r) => h('button', { type: 'button', class: 'vnav-row' + (r.current ? ' on' : ''), disabled: r.current || r.disabled, onclick: () => { close(); saveNow(); r.go(); } }, h('span', { class: 'vn-t' }, r.title, r.need === 'optional' ? h('i', {}, ' optional') : null), h('span', { class: 'vn-s' }, r.current ? 'You are here' : r.label)))) : null,
+        h('h3', { class: 'drawer-title' }, 'Sections'), h('small', { class: 'muted' }, subtitle || survey.title), filter, list, onCopy ? h('button', { type: 'button', class: 'btn drawer-copy', onclick: () => { close(); onCopy(); } }, icon('copy', 16), 'Copy from another survey') : null, h('button', { type: 'button', class: 'btn drawer-copy', onclick: () => { close(); saveNow(); onExit(); } }, icon('back', 16), 'Save and exit')), h('button', { type: 'button', class: 'drawer-dim', 'aria-label': 'Close sections', onclick: close }));
+    ingRoot.append(dr);
+  }
+  function markAll() {
+    const l = checkables(pages[page]); let missing = 0;
+    for (const c of l) { if (c.f.required && !answeredNow(c)) { missing++; continue; } sub.checked[c.path] = true; }
+    saveNow(); refresh();
+    if (missing) ctx.toast(`${missing} required answer${missing === 1 ? ' is' : 's are'} still missing, not marked.`);
+  }
+  /** Previous / Next walk every page in order (tab by tab, across sections), so nothing is skipped. The menu is for jumping. */
+  function sectionJump(dir) {
+    const to = page + dir;
+    if (to < 0) return;
+    if (to >= pages.length) { const is = issuesNow(); is.length ? openCheck() : onFinish?.(); return; }
+    page = to; saveNow(); draw(); body.scrollTop = 0;
+  }
+  function updateIngress() {
+    if (!ingRoot) return;
+    const secs = sectionList(), here = secs.findIndex((x) => x.idx.includes(page)), st = allStats(), pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
+    const q = (s2) => ingRoot.querySelector(s2);
+    q('.ing-title b').textContent = survey.title; q('.ing-title small').textContent = subtitle;
+    const done = st.total > 0 && st.done === st.total;
+    const pill = q('.ing-pill'); pill.textContent = done ? 'All answered' : (status || 'In progress'); pill.className = 'ing-pill' + (done ? ' done' : '');
+    q('.ing-prog i').style.width = `${pct}%`; q('.ing-pct').textContent = `${pct}%`; q('.ing-fields').textContent = `${st.done}/${st.total} fields`;
+    const sc = secs[here];
+    q('.ing-tabs').replaceChildren(...sc.idx.map((i) => { const t = pageStats(i), ok = t.total > 0 && t.done === t.total;
+      return h('button', { type: 'button', class: 'ing-tab' + (i === page ? ' on' : ''), onclick: () => { page = i; saveNow(); draw(); body.scrollTop = 0; } }, stripHtml(pages[i].label || pages[i].name), t.total ? h('i', { class: 'tabmark ' + (ok ? 'ok' : 'todo'), title: ok ? 'All answered' : `${t.total - t.done} to answer` }, ok ? icon('check', 11) : null) : null); }));
+    q('.ing-tabs').hidden = sc.idx.length < 2;
+    const ss = sc.idx.reduce((a, i) => { const x = pageStats(i); a.total += x.total; a.done += x.done; return a; }, { total: 0, done: 0 }), spct = ss.total ? Math.round((ss.done / ss.total) * 100) : 0;
+    q('.ing-sechead .sh-l b').textContent = sc.name;
+    q('.ing-sechead small').textContent = checkables(pages[page]).some((c) => c.f.required && c.f.type !== 'image') ? 'Required on site. N/A and Could not record count as answers.' : `${ss.done} of ${ss.total} fields answered`;
+    q('.sh-r .ing-prog i').style.width = `${spct}%`; q('.sh-pct').textContent = `${spct}%`; q('.sh-r').hidden = !ss.total;
+    q('.ing-prev').disabled = page === 0;
+    const nx = pages[page + 1]; q('.ing-next').textContent = !nx ? 'Finish' : stripHtml(nx.label || nx.name);
+  }
+  function buildIngress() {
+    const r = h('div', { class: 'screen ing' },
+      h('header', { class: 'ing-head' },
+        h('div', { class: 'ing-top' }, h('button', { type: 'button', class: 'iconbtn ink', 'aria-label': 'Sections', onclick: () => { saveNow(); openDrawer(); } }, icon('menu', 20)),
+          h('div', { class: 'ing-title' }, h('b', {}), h('small', {})), h('button', { type: 'button', class: 'ing-pill', onclick: openCheck }, '')),
+        h('div', { class: 'ing-progrow' }, h('div', { class: 'ing-prog' }, h('i')), h('b', { class: 'ing-pct' }), h('small', { class: 'ing-fields muted' })),
+        h('div', { class: 'ing-tabs' })),
+      banner ? h('div', { class: 'welcome-back' }, icon('check', 18), h('div', {}, ...String(banner).split('|').map((t, i) => (i ? h('small', {}, t) : h('b', {}, t))))) : null,
+      h('div', { class: 'ing-sechead' }, h('div', { class: 'sh-l' }, h('b'), h('small', { class: 'muted' })), h('div', { class: 'sh-r' }, h('div', { class: 'ing-prog sm' }, h('i')), h('b', { class: 'sh-pct' }))),
+      body,
+      h('footer', { class: 'ing-bar' }, h('button', { type: 'button', class: 'btn ing-prev', onclick: () => sectionJump(-1) }, 'Previous'), h('button', { type: 'button', class: 'btn primary', onclick: openCheck }, 'Check survey'), h('button', { type: 'button', class: 'btn ing-next', onclick: () => sectionJump(1) }, 'Next')));
+    body.classList.add('ing-body');
+    return r;
+  }
+  if (ing) { body.prepend = body.prepend.bind(body); }
+
+  if (pullAll()) { S.recalc(survey, sub.answers); saveNow(); }
   draw();
+  if (ing) { updateIngress(); ingRoot.api = { openCheck, openDrawer, markAll, go: (i) => { page = i; draw(); }, issues: issuesNow, page: () => page }; return ingRoot; }
   return root;
 }
 

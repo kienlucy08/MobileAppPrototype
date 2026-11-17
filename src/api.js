@@ -9,23 +9,25 @@ export { PROFILES };
 
 export class RemoteServer {
   constructor({ scale = 1, profile = 'good', base = '' } = {}) {
-    this.scale = scale; this.profileName = profile; this.base = base; this.acksLost = 0; this.token = null; this.onAuthError = null;
+    this.scale = scale; this.profileName = profile; this.base = base; this.acksLost = 0; this.token = null; this.org = null; this.onAuthError = null; this.onAccessEnded = null;
     this._stats = { dupesPrevented: 0, receivedItems: 0, records: 0, minSchema: 1, sharedOpen: 0, issuesOpen: 0 };
   }
   get profile() { return PROFILES[this.profileName]; }
   setProfile(n) { this.profileName = n; }
   setToken(t) { this.token = t; }
+  setOrg(o) { this.org = o; }
   stats() { return { ...this._stats, acksLost: this.acksLost }; }
 
   async _fetch(method, url, body, raw, extra = {}) {
     let res;
     try {
-      res = await fetch(this.base + url, { method, body: raw ? body : body === undefined ? undefined : JSON.stringify(body), headers: { ...(raw ? { 'content-type': 'application/octet-stream' } : body === undefined ? {} : { 'content-type': 'application/json' }), ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), ...extra } });
+      res = await fetch(this.base + url, { method, body: raw ? body : body === undefined ? undefined : JSON.stringify(body), headers: { ...(raw ? { 'content-type': 'application/octet-stream' } : body === undefined ? {} : { 'content-type': 'application/json' }), ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), ...(this.org ? { 'x-org': this.org } : {}), ...extra } });
     } catch { throw new NetError('ERR-NET-002', 'Cannot reach the server'); }
     if (res.status >= 500) throw new NetError('ERR-NET-001', `Server error ${res.status}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err = new AppError(data.error?.code || 'ERR-GEN-000', data.error?.detail || `HTTP ${res.status}`, data.error?.data);
+      if (err.code === 'ERR-AUTH-005') this.onAccessEnded?.(err, this.org);                  // membership in the active organization ended
       if (err.code === 'ERR-AUTH-001') this.onAuthError?.(err);              // account removed / session ended
       throw err;
     }
@@ -49,6 +51,16 @@ export class RemoteServer {
     return this._call(1500, 'GET', `/api/shared/${id}/ops?${q}`);
   }
   assign(id, a) { return this._call(500, 'POST', `/api/shared/${id}/assign`, a); }
+  // ---- assigned site visits (My work) ---------------------------------------------------------------
+  visits({ org, updatedSince = 0 } = {}) { return this._call(1200, 'GET', `/api/visits?org=${encodeURIComponent(org || this.org || '')}&updatedSince=${updatedSince}`); }
+  unassigned({ org } = {}) { return this._call(800, 'GET', `/api/visits/unassigned?org=${encodeURIComponent(org || this.org || '')}`); }
+  visitStatus(id, a) { return this._call(500, 'POST', `/api/visits/${id}/status`, a); }
+  visitsAll({ org } = {}) { return this._call(1200, 'GET', `/api/visits?all=1&org=${encodeURIComponent(org || this.org || '')}`); }
+  surveyAssign(id, a) { return this._call(500, 'POST', `/api/visits/${id}/assign`, a); }
+  surveyStatus(id, a) { return this._call(500, 'POST', `/api/visits/${id}/survey`, a); }
+  claimVisit(id, a = {}) { return this._call(500, 'POST', `/api/visits/${id}/claim`, a); }
+  attachVisit(a) { return this._call(500, 'POST', '/api/visits/attach', a); }
+  async admin(path, body) { return this._fetch('POST', `/api/admin/${path}`, body || {}); }
   siteData(site) { return this._call(1500, 'GET', `/api/sitedata?site=${encodeURIComponent(site)}`); }
   team() { return this._call(800, 'GET', '/api/team'); }
   notifications() { return this._call(800, 'GET', '/api/notifications'); }
@@ -56,6 +68,7 @@ export class RemoteServer {
   submitShared(id, a) { return this._call(500, 'POST', `/api/shared/${id}/submit`, a); }
 
   organizations() { return this._call(800, 'GET', '/api/identity/organizations'); }
+  authOrgs() { return this._call(400, 'GET', '/api/auth/orgs'); }
   loginPassword(a) { return this._call(600, 'POST', '/api/auth/login', a); }
   loginMicrosoft(a) { return this._call(600, 'POST', '/api/auth/microsoft', a); }
   me() { return this._call(600, 'GET', '/api/identity/me'); }

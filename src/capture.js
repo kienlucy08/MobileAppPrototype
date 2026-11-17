@@ -10,7 +10,7 @@ import { h, uid } from './util.js';
 import { icon } from './icons.js';
 import { addImages } from './images.js';
 
-const ZOOMS = [0.5, 1, 2, 10];
+const ZOOMS = [0.5, 1, 2, 5, 10];
 const DEMO = new URLSearchParams(globalThis.location?.search || '').has('demo');   // demo pages always use the simulated camera so 0.5x and 10x work on any laptop
 
 function drawScene(cv, zoom) {                    // the simulated "camera": a guyed tower; 0.5x shows more of the site, 2x less
@@ -36,7 +36,8 @@ export async function scenePhoto(zoom, name) {
 }
 
 /** Opens the camera sheet. `onShots(files)` is called with each photo as it is taken. Returns { close }. */
-export async function openCamera({ container, defaultZoom = 1, onShot, onClose, title = 'Camera', fallbackInput }) {
+export async function openCamera({ container, defaultZoom = 1, onShot, onClose, title = 'Camera', fallbackInput, multi = false, guide = null, tip = '' }) {
+  let multiOn = false; const staged = [];
   let zoom = defaultZoom, taken = 0, stream = null, track = null, caps = null, sim = false;
   const video = h('video', { class: 'cam-view', playsinline: true, muted: true, autoplay: true });
   const scene = h('canvas', { class: 'cam-view', width: 960, height: 720 });
@@ -58,6 +59,9 @@ export async function openCamera({ container, defaultZoom = 1, onShot, onClose, 
     if (sim) drawScene(scene, z);
     else if (caps?.zoom) { try { await track.applyConstraints({ advanced: [{ zoom: z }] }); } catch { /* keep current */ } }
     zbtns.replaceChildren(...ZOOMS.map((v) => h('button', { type: 'button', class: 'zbtn' + (v === zoom ? ' on' : ''), disabled: !supported(v), title: supported(v) ? `${v}x` : `${v}x needs the native camera build`, onclick: () => apply(v) }, `${v}×`)));
+    if (multiOn) return;
+    if (guide) { note.textContent = ''; return; }
+    if (DEMO && multi) { note.textContent = defaultZoom < 1 ? 'Opens at 0.5× for wide shots' : ''; return; }
     note.textContent = sim ? 'No camera on this device — simulated scene. The native app uses the phone camera directly (all lenses, 0.5x, full quality).'
       : !supported(0.5) ? '0.5× ultra-wide is not exposed by this browser. The native app calls the camera API directly and offers it.' : '';
   };
@@ -81,20 +85,68 @@ export async function openCamera({ container, defaultZoom = 1, onShot, onClose, 
         cv.getContext('2d').drawImage(video, 0, 0); blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.95));
       }
     }
-    taken++; count.textContent = `${taken} taken`;
+    taken++; count.textContent = multi && multiOn ? `${staged.length + 1} photos taken` : `${taken} taken`;
     flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');          // shutter flash
     const th = URL.createObjectURL(blob); last.replaceChildren(h('img', { src: th, alt: 'Last photo' }), h('small', {}, `${zoom}×`));
-    onShot(new File([blob], `IMG_${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}_${taken}.jpg`, { type: 'image/jpeg', lastModified: Date.now() }));
+    const file = new File([blob], `IMG_${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}_${taken}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+    if (guide) { await guidedShot(file, th); return; }
+    if (multi && multiOn) { staged.push({ file, url: th }); drawStrip(); } else onShot(file);          // multi: stage it; nothing is added until "Add N photos"
+  };
+  const strip = h('div', { class: 'cam-strip', hidden: true }), addBtn = h('button', { type: 'button', class: 'btn primary big cam-add', hidden: true }, 'Add photos');
+  const drawStrip = () => {
+    strip.replaceChildren(...Array.from({ length: Math.max(5, staged.length) }, (_, i) => h('i', { class: 'slot' + (staged[i] ? ' full' : '') }, staged[i] ? h('img', { src: staged[i].url, alt: `Photo ${i + 1}` }) : null)));
+    addBtn.textContent = staged.length ? `Add ${staged.length} photo${staged.length === 1 ? '' : 's'}` : 'Add photos'; addBtn.disabled = !staged.length;
+    count.textContent = `${staged.length} photo${staged.length === 1 ? '' : 's'} taken`;
+  };
+  const addAll = () => { for (const x of staged.splice(0)) onShot(x.file); close(); };
+  addBtn.onclick = addAll;
+  const toggleMulti = () => {
+    multiOn = !multiOn; multiBtn.classList.toggle('on', multiOn); strip.hidden = addBtn.hidden = !multiOn;
+    note.textContent = multiOn ? 'Keep shooting. Nothing is added until you tap Add.' : '';
+    if (multiOn) drawStrip(); else { count.textContent = `${taken} taken`; }
   };
 
   const burstBtn = h('button', { type: 'button', class: 'btn small burst', title: `Take ${BURST} photos in a row`, onclick: burst }, `Burst ×${BURST}`);
+  const multiBtn = h('button', { type: 'button', class: 'btn small multi', title: 'Take several photos, then add them all', onclick: toggleMulti }, 'Multi');
+  // ---- guided photos: the camera prompts each photo and files it in the right slot -------------------
+  let gi = 0, gmode = 'guided';
+  const promptEl = h('div', { class: 'cam-prompt', hidden: !guide && !tip }), promptSub = h('small', {}), promptMode = h('button', { type: 'button', class: 'btn small ghost', onclick: () => { gmode = gmode === 'guided' ? 'ask' : 'guided'; drawGuide(); } });
+  const gBack = h('button', { type: 'button', class: 'btn small', onclick: () => { gi = Math.max(0, gi - 1); drawGuide(); } }, 'Back'), gSkip = h('button', { type: 'button', class: 'btn small', onclick: () => advance() }, 'Skip'), gReview = h('button', { type: 'button', class: 'btn small', onclick: () => openReview() }, 'Review');
+  const gbar = h('div', { class: 'cam-gbar', hidden: !guide }, gBack, gSkip, gReview, promptMode);
+  const nextUndone = (from) => { for (let i = from; i < guide.steps.length; i++) if (!guide.isDone(i)) return i; return -1; };
+  const drawGuide = () => {
+    if (!guide) return;
+    const st = guide.steps[gi], done = guide.steps.filter((_, i) => guide.isDone(i)).length;
+    titleEl.textContent = gmode === 'ask' ? 'Guided photos' : st.label;
+    promptEl.replaceChildren(h('b', { class: 'tip' }, gmode === 'ask' ? 'Take a photo, then choose where it goes' : st.tip || st.label), h('small', {}, gmode === 'ask' ? `${done} of ${guide.steps.length} photos placed` : `${gi + 1} of ${guide.steps.length} · ${st.group}${guide.isDone(gi) ? ' · already has a photo, this adds another' : ''}`));
+    promptMode.textContent = gmode === 'guided' ? 'Ask each time' : 'Guided';
+    gSkip.hidden = gBack.hidden = gmode === 'ask'; if (!sim) note.textContent = '';
+  };
+  const advance = () => { const n = nextUndone(gi + 1); if (n < 0 || gi + 1 >= guide.steps.length && n < 0) { openReview(); return; } gi = n; drawGuide(); };
+  const guidedShot = async (file, thumb) => {
+    if (gmode === 'guided') {
+      const st = guide.steps[gi]; await guide.assign(gi, new File([file], `${st.name}.jpg`, { type: 'image/jpeg', lastModified: Date.now() }), thumb); last.replaceChildren(h('img', { src: thumb, alt: 'Last photo' }), h('small', {}, st.label)); advance();
+    } else {
+      const choose = h('div', { class: 'cam-choose' }, h('b', {}, 'Where does this photo go?'), h('div', { class: 'cam-choices' }, ...guide.steps.map((st, i) => h('button', { type: 'button', class: 'btn small' + (guide.isDone(i) ? ' ghost' : ''), onclick: async () => { choose.remove(); await guide.assign(i, new File([file], `${st.name}.jpg`, { type: 'image/jpeg', lastModified: Date.now() }), thumb); drawGuide(); } }, st.label))), h('button', { type: 'button', class: 'link', onclick: () => choose.remove() }, 'Discard this photo'));
+      el.append(choose);
+    }
+  };
+  const openReview = () => {
+    const rev = h('div', { class: 'cam-review' }, h('h3', {}, 'Review the photos'), h('small', {}, `${guide.steps.filter((_, i) => guide.isDone(i)).length} of ${guide.steps.length} taken`),
+      h('div', { class: 'rev-list' }, ...guide.steps.map((st, i) => { const th = guide.thumb?.(i); return h('div', { class: 'rev-row' + (guide.isDone(i) ? ' ok' : '') }, th ? h('img', { src: th, alt: st.label }) : h('i', { class: 'rev-empty' }), h('div', { class: 'grow' }, h('b', {}, st.label), h('small', {}, guide.isDone(i) ? 'Taken' : 'Missing')), h('button', { type: 'button', class: 'btn small', onclick: async () => { rev.remove(); gmode = 'guided'; gi = i; if (guide.isDone(i)) await guide.clear?.(i); drawGuide(); } }, guide.isDone(i) ? 'Retake' : 'Take')); })),
+      h('button', { type: 'button', class: 'btn primary big', onclick: () => { rev.remove(); close(); } }, 'Finish'));
+    el.append(rev);
+  };
+  const titleEl = h('b', {}, title);
   const close = () => { stream?.getTracks().forEach((t) => t.stop()); el.remove(); onClose?.(taken); };
   const el = h('div', { class: 'cam' },
-    h('header', { class: 'cam-top' }, h('b', {}, title), count, h('button', { type: 'button', class: 'btn small', onclick: close }, 'Done')),
-    h('div', { class: 'cam-stage' }, sim ? scene : video, flash, last), note, zbtns,
+    h('header', { class: 'cam-top' }, titleEl, count, h('button', { type: 'button', class: 'btn small', onclick: guide ? () => openReview() : close }, guide ? 'Review' : 'Done')),
+    promptEl, h('div', { class: 'cam-stage' }, sim ? scene : video, flash, last), note, gbar, zbtns,
     h('div', { class: 'cam-bar' }, fallbackInput ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => { close(); fallbackInput.click(); } }, 'Use phone camera app') : h('span'),
-      h('button', { type: 'button', class: 'shutter', 'aria-label': 'Take photo', onclick: shoot }), burstBtn));
+      h('button', { type: 'button', class: 'shutter', 'aria-label': 'Take photo', onclick: shoot }), guide ? h('span') : multi ? multiBtn : burstBtn), strip, addBtn);
   container.append(el);
+  if (guide) { gi = Math.max(0, nextUndone(guide.startAt ?? 0)); if (gi < 0) gi = 0; drawGuide(); }
+  else if (tip) promptEl.replaceChildren(h('b', { class: 'tip' }, tip), h('small', {}, multi ? 'Tap Multi to take several, then Add them.' : ''));
   await apply(supported(defaultZoom) ? defaultZoom : 1);
   return { close };
 }

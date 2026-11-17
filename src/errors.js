@@ -23,6 +23,10 @@ export const ERRORS = {
   'ERR-AUTH-002': { title: 'Wrong username or password', cause: 'Use the same username and password you use on the FieldSync web app.', fix: 'Try again', action: 'none' },
   'ERR-AUTH-003': { title: 'This Microsoft account has no FieldSync access', cause: 'The account is not set up in FieldSync.', fix: 'Ask your admin to add you', action: 'none' },
   'ERR-AUTH-004': { title: 'Your role cannot do that', cause: 'Crew members add photos and data; the crew lead (or a PM) submits the final record and shares or reassigns it.', fix: 'Ask your crew lead', action: 'none' },
+  'ERR-AUTH-005': { title: 'Your access has ended', cause: 'Your membership in this organization was deactivated. Surveys already sent stay on the server.', fix: 'Choose another organization', action: 'none' },
+  'ERR-VISIT-403': { title: 'No permission', cause: 'You do not have permission to change this visit.', fix: 'Ask your PM', action: 'none' },
+  'ERR-VISIT-409': { title: 'Visit changed', cause: 'This visit changed. Someone else claimed it, or it was reassigned.', fix: 'Refresh My work', action: 'none' },
+  'ERR-VISIT-422': { title: 'Reason required', cause: 'A reason is required to block a visit.', fix: 'Add a reason', action: 'none' },
   'ERR-GEN-000': { title: 'Unexpected internal error', cause: 'Something the app did not anticipate. Detail is attached to the log entry.', fix: 'Export log and share with support', action: 'export' },
 };
 

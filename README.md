@@ -14,7 +14,9 @@ npm start              # starts the server and prints the URLs below
 | URL | What |
 |---|---|
 | `http://localhost:8123/features.html` | **Every requested feature and where it lands**: all suggested features, MVP (standalone), post-MVP (standalone), by phase. |
-| `http://localhost:8123/` | **Prototype by phase**: one tab per build phase (Phase 1 reliability, Phase 2 team-ready, Later), each with its own phones, a feature checklist and a "try this" script. Per-phone network switch and "kill app". |
+| `http://localhost:8123/` | **FieldSync Mobile demo** (start here): the phone in the middle, the 13 flows from the wireframe flow map on the left (each puts the phone where the flow starts), and on the right the web app / PM / network controls, the open questions for management and a notes box. |
+| `http://localhost:8123/mobile.html` | The FieldSync Mobile app on its own (open it on a real phone via the LAN address `npm start` prints). Sign in as `jordan@demo.test` / `demo` (two organizations), or `maria`, `sam`, `priya`. |
+| `http://localhost:8123/collect.html` | The earlier **Field Collect prototype by phase** (Phase 1 reliability, Phase 2 team-ready, Later). Kept for reference: sharing, team records and nearby sync live there, not in FieldSync Mobile.
 | `http://localhost:8123/app.html` | The app itself — open this on a real phone (same Wi-Fi) using the LAN address `npm start` prints. |
 | `http://localhost:8123/admin.html` | Dev-team console: problem reports with logs, records and photos, team surveys, stats. |
 

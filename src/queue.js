@@ -65,13 +65,20 @@ export class Engine extends EventTarget {
   }
 
   // ---- public controls --------------------------------------------------------------------------
-  async submit(sub, keepIds) {
+  /** `hold`: "Put in the queue" — saved and waiting until the crew taps Upload all (status 'ready'). Otherwise it sends now. */
+  async submit(sub, keepIds, { hold = false } = {}) {
     for (const m of [...this.mediaFor(sub.id)]) if (!keepIds.has(m.id)) await this.removeMedia(m.id);
     for (const m of this.mediaFor(sub.id)) if (m.state === 'local') { m.state = 'queued'; await this._saveMedia(m); }
-    sub.status = 'queued'; sub.submittedAt = Date.now(); sub.error = null;
+    sub.status = hold ? 'ready' : 'queued'; sub.submittedAt = Date.now(); sub.error = null;
     await this._saveSub(sub);
-    this._log('info', null, `Saved to outbox with ${this.mediaFor(sub.id).length} photo(s). Uploading in background.`, sub.id);
-    this._loop();
+    this._log('info', null, hold ? `Put in the queue with ${this.mediaFor(sub.id).length} photo(s). Waiting for Upload all.` : `Saved to outbox with ${this.mediaFor(sub.id).length} photo(s). Uploading in background.`, sub.id);
+    this._emit(); if (!hold) this._loop();
+  }
+  /** Upload all: release every record that was put in the queue. */
+  async uploadAll() {
+    const held = [...this.subs.values()].filter((s) => s.status === 'ready');
+    for (const s of held) { s.status = 'queued'; await this._saveSub(s); }
+    this.nudge(); this._loop(); return held.length;
   }
   async retry(subId) {
     const sub = this.subs.get(subId); if (!sub) return;
@@ -128,7 +135,7 @@ export class Engine extends EventTarget {
     if (!sub.began) {
       await this._retry(sub, async () => {
         const r = await this.server.begin({
-          id: sub.id, surveyId: sub.surveyId, schemaVersion: sub.schemaVersion, answers: sub.answers,
+          id: sub.id, surveyId: sub.surveyId, visitId: sub.visitId, orgId: sub.orgId, schemaVersion: sub.schemaVersion, answers: sub.answers,
           media: items.map((m) => ({ id: m.id, fieldPath: m.fieldPath, size: m.size, name: m.name, w: m.w, h: m.h, meta: m.meta })),
         });
         for (const id of r.have) { const m = this.media.get(id); if (m && m.state !== 'done') { m.state = 'done'; await this._saveMedia(m); } }

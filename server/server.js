@@ -8,10 +8,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ServerCore, freshState, MAX_PHOTO_BYTES } from '../src/serverCore.js';
+import { BUILD } from '../src/build.js';
 import { AppError } from '../src/errors.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.md': 'text/markdown; charset=utf-8', '.csv': 'text/csv; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.md': 'text/markdown; charset=utf-8', '.csv': 'text/csv; charset=utf-8', '.svg': 'image/svg+xml' };
 
 export function createServer({ dataDir = path.join(here, 'data'), root = path.join(here, '..') } = {}) {
   fs.mkdirSync(path.join(dataDir, 'media'), { recursive: true });
@@ -47,10 +48,13 @@ export function createServer({ dataDir = path.join(here, 'data'), root = path.jo
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const user = open ? null : core.userFor(token);
     const who = core.who(user);
+    const orgHdr = req.headers['x-org'];
+    if (user && orgHdr && orgHdr !== 'all' && !core.isMember(user.email, orgHdr)) throw new AppError('ERR-AUTH-005');   // membership ended: the phone signs out of that organization only
+    if (m === 'GET' && p === '/api/auth/orgs') return send(res, 200, core.state.orgs.map((o) => ({ id: o.id, name: o.name })));
     if (m === 'POST' && p === '/api/auth/login') return send(res, 200, core.loginPassword(await json(req)));
     if (m === 'POST' && p === '/api/auth/microsoft') return send(res, 200, core.loginMicrosoft(await json(req)));
     if (m === 'GET' && p === '/api/identity/me') return send(res, 200, core.me(token));
-    if (m === 'GET' && p === '/api/ping') return send(res, 200, { ok: true, t: Date.now() });
+    if (m === 'GET' && p === '/api/ping') return send(res, 200, { ok: true, t: Date.now(), build: BUILD });
     if (m === 'GET' && p === '/api/stats') return send(res, 200, core.stats());
     if (m === 'POST' && p === '/api/begin') return send(res, 200, core.begin({ ...(await json(req)), user: who }));
     if (m === 'POST' && p === '/api/commit') return send(res, 200, core.commit(await json(req)));
@@ -75,6 +79,16 @@ export function createServer({ dataDir = path.join(here, 'data'), root = path.jo
     if (m === 'POST' && p === '/api/admin/reset') { core.state = freshState(); fs.rmSync(path.join(dataDir, 'media'), { recursive: true, force: true }); fs.mkdirSync(path.join(dataDir, 'media'), { recursive: true }); save(); return send(res, 200, { ok: true }); }
     if (m === 'GET' && p === '/api/admin/overview') return send(res, 200, core.overview());
 
+    if (m === 'GET' && p === '/api/visits' && url.searchParams.get('all')) return send(res, 200, core.visitsAll(user, { orgId: url.searchParams.get('org') || orgHdr }));
+    if (m === 'GET' && p === '/api/visits') return send(res, 200, core.visitsFor(user, { orgId: url.searchParams.get('org') || orgHdr, updatedSince: Number(url.searchParams.get('updatedSince') || 0) }));
+    if (m === 'GET' && p === '/api/visits/unassigned') return send(res, 200, core.unassignedFor(user, { orgId: url.searchParams.get('org') || orgHdr }));
+    if ((g = p.match(/^\/api\/visits\/([^/]+)\/assign$/)) && m === 'POST') return send(res, 200, core.assignSurvey(user, g[1], await json(req)));
+    if ((g = p.match(/^\/api\/visits\/([^/]+)\/survey$/)) && m === 'POST') return send(res, 200, core.surveyStatus(user, g[1], await json(req)));
+    if ((g = p.match(/^\/api\/visits\/([^/]+)\/(status|claim)$/)) && m === 'POST') return send(res, 200, g[2] === 'status' ? core.visitStatus(user, g[1], await json(req)) : core.claim(user, g[1], await json(req)));
+    if (m === 'POST' && p === '/api/visits/attach') return send(res, 200, core.attach(user, await json(req)));
+    if (m === 'POST' && p === '/api/admin/visit') return send(res, 200, core.adminVisit(await json(req)));
+    if (m === 'POST' && p === '/api/admin/membership') return send(res, 200, core.setMembership(await json(req)));
+    if (m === 'POST' && p === '/api/admin/visits-reset') return send(res, 200, core.resetVisits());
     if (m === 'GET' && p === '/api/sitedata') return send(res, 200, core.siteData(url.searchParams.get('site') || ''));
     if (m === 'GET' && p === '/api/team') return send(res, 200, core.teammates(user));
     if (m === 'GET' && p === '/api/notifications') return send(res, 200, core.notificationsFor(user));
@@ -111,7 +125,7 @@ export function createServer({ dataDir = path.join(here, 'data'), root = path.jo
       if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else serveStatic(req, res, url);
     } catch (e) {
-      if (e instanceof AppError) send(res, /^ERR-AUTH-00[123]/.test(e.code) ? 401 : e.code === 'ERR-AUTH-004' ? 403 : 422, { error: { code: e.code, detail: e.message, data: e.data } });
+      if (e instanceof AppError) send(res, /^ERR-AUTH-00[123]/.test(e.code) ? 401 : /^ERR-AUTH-00[45]$|^ERR-VISIT-403$/.test(e.code) ? 403 : e.code === 'ERR-VISIT-409' ? 409 : 422, { error: { code: e.code, detail: e.message, data: e.data } });
       else { console.error(e); send(res, 500, { error: { code: 'ERR-GEN-000', detail: e.message } }); }
     }
   });

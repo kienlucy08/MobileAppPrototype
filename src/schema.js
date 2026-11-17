@@ -168,6 +168,7 @@ export function validate(survey, answers) {
         arr.forEach((it, i) => walk(f.fields, it, `${path}[${i}].`, pageIdx, `${cleanLabel(f.label || f.name)} ${i + 1} → `));
         continue;
       }
+      if (item[f.name + '__state']) continue;                 // answered as N/A or Could not record: counts as answered (never a blank)
       for (const is of fieldIssues(f, scope.self, scope)) issues.push({ ...is, message: labelPrefix + is.message, path, pageIdx });
     }
   };
@@ -185,6 +186,7 @@ export function prune(survey, answers) {
       if (f.type === 'repeat') out[f.name] = (item[f.name] || []).map((it) => walk(f.fields, it));
       else if (f.type === 'image') { out[f.name] = [...(item[f.name] || [])]; out[f.name].forEach((id) => mediaIds.add(id)); }
       else if (item[f.name] !== undefined) out[f.name] = item[f.name];
+      if (item[f.name + '__state']) out[f.name + '__state'] = item[f.name + '__state'];
     }
     return out;
   };

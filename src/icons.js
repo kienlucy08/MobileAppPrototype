@@ -19,6 +19,17 @@ const P = {
   user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0',
   bell: 'M6 16V11a6 6 0 1112 0v5l2 2H4l2-2zM10 21h4',
   download: 'M12 4v12m0 0l-4-4m4 4l4-4M4 20h16',
+  menu: 'M4 7h16M4 12h16M4 17h16',
+  link: 'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1',
+  list: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
+  map: 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14',
+  queue: 'M4 6h16M4 12h16M4 18h10M18 16v4m-2-2h4',
+  heart: 'M12 20s-7-4.5-7-10a4 4 0 017-2.5A4 4 0 0119 10c0 5.5-7 10-7 10z',
+  trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13',
+  copy: 'M9 9h10v11H9zM5 15V4h10',
+  chevron: 'M9 5l7 7-7 7',
+  swap: 'M7 4l-4 4 4 4M3 8h14M17 20l4-4-4-4M21 16H7',
+  shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z',
 };
 
 export const icon = (name, size = 18) =>

@@ -27,7 +27,13 @@ const member = async ([, username], lk) => {
   return JSON.stringify({ firstName: p.firstName ?? '', lastName: p.lastName ?? '', username: p.username ?? username, email: p.email ?? '' });
 };
 
+// Stand-in lookups for the Job Safety Analysis start page: they need signal, never block the form, and fill in when it returns.
+const near = (text) => async () => { await new Promise((r) => setTimeout(r, 400)); return text; };
+const coords = ([lat, lon]) => Number.isFinite(Number(lat)) && lat !== '' && Number.isFinite(Number(lon)) && lon !== '';
 const HANDLERS = {
+  'places.js:nearestHospital': { ready: coords, run: near('Mercy Medical Center · 6.2 mi'), network: true },
+  'places.js:nearestFire': { ready: coords, run: near('Station 4 · 2.1 mi'), network: true },
+  'places.js:weatherNow': { ready: coords, run: near('Clear · 54 °F · wind 8 mph'), network: true },
   'weather.js:runWeatherCalcs': { ready: ([lat, lon]) => Number.isFinite(Number(lat)) && lat !== '' && Number.isFinite(Number(lon)) && lon !== '', run: weather, network: true },
   'validateusers.js:validateUsername': { ready: ([, u]) => !!u, run: member, network: false },
 };
