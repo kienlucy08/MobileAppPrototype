@@ -105,6 +105,7 @@ button.card.issue { text-align: left; border: 1px solid #f1b8b3; width: 100%; di
 .plist { padding: 0; overflow: hidden; } .pcard { display: flex; gap: 12px; align-items: center; }
 .perm { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 10px; padding: 10px 12px; } .permico { width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; display: grid; place-items: center; flex: none; } .perm.off { opacity: .6; } .perm.off .permico { background: #9aa3b8; } .later { color: var(--muted); font-weight: 700; }
 .scopecard { background: #fff; border: 0; border-radius: 12px; padding: 12px 14px; text-align: left; } .held { display: grid; gap: 4px; }
+.finish-opt.suggest { border-color: #6B75E8; background: #F3F4FF; }
 .ready-card { background: var(--pale); border-radius: 12px; padding: 12px 14px; display: grid; gap: 2px; } .finish-opt { text-align: left; border: 1.5px solid var(--line); background: #fff; border-radius: 12px; padding: 12px 14px; display: grid; gap: 2px; } .finish-opt.primary { background: var(--primary); border-color: var(--primary); color: #fff; } .finish-opt small { opacity: .8; } .finish-opt.danger b { color: var(--err); }
 .check-card { display: flex; align-items: center; gap: 12px; text-align: left; background: #fff; border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; width: 100%; margin-bottom: 8px; } .check-card.on { border-color: var(--primary); } .cbox { width: 22px; height: 22px; border-radius: 6px; border: 2px solid #9aa3b8; display: grid; place-items: center; flex: none; color: #fff; } .check-card.on .cbox { background: var(--primary); border-color: var(--primary); }
 .check-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; background: #F6F7FC; border: 1px solid var(--line); border-radius: 12px; padding: 11px 14px; }
@@ -210,3 +211,8 @@ img.mlogo { width: 32px; height: 32px; border-radius: 0; background: none; displ
 .sv-hist { color: var(--muted); font-size: 11.5px; display: block; }
 
 .cam-prompt b.tip { font-size: 15px; line-height: 1.3; padding: 4px 8px; } .seg.mini { margin: 2px 0; } .seg.mini button { padding: 6px 4px; font-size: 12.5px; }
+
+/* MVP / Beta switch in the corner (phone opened on its own) */
+.modesw { position: fixed; top: 4px; right: 6px; transform: scale(.82); transform-origin: top right; z-index: 50; display: flex; background: #1B2233; border-radius: 999px; padding: 3px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+.modesw button { border: 0; background: transparent; color: #cbd2e1; font: 700 12px/1 system-ui, sans-serif; padding: 7px 12px; border-radius: 999px; cursor: pointer; }
+.modesw button.on { background: #6B75E8; color: #fff; }

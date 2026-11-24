@@ -6,6 +6,7 @@ import { addImages } from './images.js';
 import { scenePhoto } from './capture.js';
 import { fmtBytes, fmtTime } from './util.js';
 import * as S from './schema.js';
+import { beta } from './mode.js';
 
 const FIX = {
   'ERR-IMG-001': ['This photo is too large to send.', 'Replace the photo, then send again. Nothing else needs to be redone.'],
@@ -33,7 +34,7 @@ export function install(M) {
       const recCard = (s, done) => { const c = engine.countsFor(s.id), [label, tone] = stPill(s);
         return h('div', { class: 'card rec' + (s.status === 'failed' ? ' bad' : '') }, h('div', { class: 'vtop' }, h('b', {}, nm(s)), M.pill(label, tone)),
           multi ? h('small', { class: 'org-tag' }, M.orgName(s.orgId)) : null,
-          h('small', { class: 'muted block' }, done ? `Delivered ${new Date(s.committedAt || s.submittedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${hhmm(s.committedAt || s.submittedAt)} · kept ${Math.max(0, 30 - Math.floor((Date.now() - (s.submittedAt || Date.now())) / 86400000))} more days` : s.status === 'ready' ? 'Waiting for Upload all' : c.total ? `${c.done} of ${c.total} photos delivered` : 'No photos'),
+          h('small', { class: 'muted block' }, done ? `Delivered ${new Date(s.committedAt || s.submittedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${hhmm(s.committedAt || s.submittedAt)}${beta() ? ` · kept ${Math.max(0, 30 - Math.floor((Date.now() - (s.submittedAt || Date.now())) / 86400000))} more days` : ''}` : s.status === 'ready' ? 'Waiting for Upload all' : c.total ? `${c.done} of ${c.total} photos delivered` : 'No photos'),
           !done && s.status !== 'ready' && c.total ? h('div', { class: 'bar' }, h('i', { style: `width:${(c.done / c.total) * 100}%` })) : null,
           s.status === 'failed' ? h('button', { type: 'button', class: 'btn small', onclick: () => M.go('errordetail', { subId: s.id }) }, 'See what to do') : null,
           done && !s.visitId && !String(s.answers?.siteId ?? '').trim() ? h('button', { type: 'button', class: 'link', onclick: () => M.go('attach', { subId: s.id }) }, 'Attach to a visit') : null); };
@@ -49,7 +50,7 @@ export function install(M) {
         ...waiting.map((s) => recCard(s, false)),
         // sent surveys, collapsed
         h('button', { type: 'button', class: 'vrow plain sentrow', onclick: () => { v.showSent = !v.showSent; draw(); } }, h('b', {}, `Sent surveys (${sent.length})`), icon('chevron', 16)),
-        v.showSent ? (sent.length ? [h('small', { class: 'muted' }, 'Sent surveys stay listed here for 30 days as proof of what you sent, then clear on their own.'), ...sent.map((s) => recCard(s, true))] : h('small', { class: 'muted' }, 'Nothing sent from this phone yet.')) : null,
+        v.showSent ? (sent.length ? [h('small', { class: 'muted' }, beta() ? 'Sent surveys stay listed here for 30 days as proof of what you sent, then clear on their own.' : 'Sent surveys stay listed here as proof of what you sent.'), ...sent.map((s) => recCard(s, true))] : h('small', { class: 'muted' }, 'Nothing sent from this phone yet.')) : null,
         h('button', { type: 'button', class: 'vrow plain', onclick: () => M.go('drafts') }, h('b', {}, `Drafts · ${[...engine.subs.values()].filter((s) => s.status === 'draft').length} surveys saved`), icon('chevron', 16)),
       ].flat().filter(Boolean));
     };

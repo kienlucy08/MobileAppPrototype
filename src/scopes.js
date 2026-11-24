@@ -9,3 +9,6 @@ export const SCOPES = {
     { id: 'demo-consmod-prework', title: 'CONS-MOD Prework Inspection', need: 'required' }, { id: 'demo-consmod-sector', title: 'CONS-MOD Sector COP', need: 'required' }, { id: 'demo-consmod-ground', title: 'CONS-MOD Ground COP', need: 'required' },
   ],
 };
+
+/** Surveys that are not part of a scope of work but are added to a site visit when they are done alongside it (a JSA, a daily update, rigging). */
+export const ADDONS = { 'demo-jsa': 'Job Safety Analysis', 'demo-daily-update': 'Daily Update', 'demo-rigging': 'Rigging Inspection' };

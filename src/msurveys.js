@@ -7,6 +7,7 @@ import { tileOf } from './library.js';
 import { SITES } from './mdata.js';
 import { NetError } from './errors.js';
 import { stripHtml } from './util.js';
+import { beta } from './mode.js';
 import { addImages } from './images.js';
 import { scenePhoto } from './capture.js';
 
@@ -128,7 +129,7 @@ export function install(M) {
     LS.set('resume', { subId: sub.id });
     const org = M.orgName(sub.orgId).split(' ')[0];
     const el = renderForm(ctx, sub, { ingress: true, startPage: v.page ?? sub.page ?? 0, focusPath: v.focusPath, banner: v.banner, subtitle: `${M.orgName(sub.orgId)} · ${sub.siteLabel || sub.answers.siteId || 'Unallocated'}`,
-      onExit: () => { LS.del('resume'); M.back(); }, onFinish: () => finishSheet(sub), onCopy: () => M.go('copysource', { subId: sub.id }), onReview: () => finishSheet(sub), visitNav: sub.visitId ? () => M.visitNav(sub) : null });
+      onExit: () => { LS.del('resume'); M.back(); }, onFinish: () => finishSheet(sub), onCopy: () => M.go('copysource', { subId: sub.id }), onReview: () => finishSheet(sub), visitNav: beta() && sub.visitId ? () => M.visitNav(sub) : null });
     const wrap = h('div', { class: 'mcol form-col' }, el); wrap.cleanup = el.cleanup;
     v.api = el.api; M.formApi = el.api;
     return wrap;
@@ -143,12 +144,14 @@ export function install(M) {
       opt('Send now', 'Sends if you have signal. If not, it waits in the queue.', true, () => confirmOrg(sub, false)),
       opt('Put in the queue', 'Send later from the Queue tab with Upload all.', false, () => confirmOrg(sub, true)),
       opt('Save as draft', 'Keep working on it later. Not queued, not sent.', false, () => { LS.del('resume'); M.toast('Saved as a draft.'); if (sub.visitId) { M.go('visit', { id: sub.visitId }, { replace: true }); afterSurvey(sub, 'Saved as a draft'); } else M.go('home', {}, { replace: true }); }),
-      !sub.visitId && !String(sub.answers.siteId ?? '').trim() ? opt('Attach to a visit', 'Match it to one of your assigned visits.', false, () => M.go('attach', { subId: sub.id })) : null,
+      ...(!sub.visitId ? [(() => { const m = M.sameSiteVisits(sub);
+        return m.length ? opt(`Add to site visit: ${m[0].name}`, `Same site ID (${String(sub.answers.siteId).trim()}). It is added next to that visit’s other surveys.`, false, () => M.go('attach', { subId: sub.id }), 'suggest')
+          : opt('Add to a site visit', 'Work done alongside an inspection or closeout, like a JSA, daily update or rigging. Pick one of your visits.', false, () => M.go('attach', { subId: sub.id })); })()] : []),
       opt('Delete survey', 'Remove it from this phone.', false, () => deleteDialog(sub), 'danger'));
   }
   /** Before anything is sent, people who work in several organizations confirm the one it goes to, and can change it. Changing moves nothing and loses nothing: the answers and photos stay on this phone. Someone in one organization is not asked. */
   function confirmOrg(sub, hold, changing = false, alsoSwitch = true) {
-    if (M.orgs().length < 2) return send(sub, hold);
+    if (!beta() || M.orgs().length < 2) return send(sub, hold);
     const org = M.orgName(sub.orgId), active = M.org(), visit = (sub.visitId || sub.heldVisit) && (M.visitList?.() || []).find((x) => x.id === (sub.visitId || sub.heldVisit));
     const differs = active && active !== 'all' && active !== sub.orgId;
     const orgCard = h('div', { class: 'org-card on static' }, h('span', { class: 'org-badge' }, org[0]), h('div', { class: 'grow' }, h('b', {}, org), h('small', { class: 'muted block' }, differs ? 'Where this survey was started' : 'The organization you are working in')));
@@ -182,7 +185,7 @@ export function install(M) {
   }
   /** Right after a survey of a visit is sent (or saved): offer the next one for the same visit, so the crew does not have to hunt for it. */
   function afterSurvey(sub, msg) {
-    if (!sub.visitId) return;
+    if (!sub.visitId || !beta()) return;
     const nx = M.nextSurvey(sub.visitId, sub.surveyId), v = (M.visitList?.() || []).find((x) => x.id === sub.visitId);
     const close = M.sheet(msg.replace(/\.$/, ''), h('p', { class: 'muted' }, nx ? `Up next in ${v?.name || 'this visit'}:` : `That is everything left to do in ${v?.name || 'this visit'}.`),
       nx ? h('button', { type: 'button', class: 'btn primary big', onclick: () => { close(); M.takeAndOpen(nx.visit, nx.sv); } }, `${nx.sv.mine ? 'Next' : 'Take and start'}: ${nx.sv.title}`) : null,

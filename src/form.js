@@ -1,5 +1,6 @@
 import { h, fmtBytes, debounce, htmlFragment, stripHtml } from './util.js';
 import { setChoices, CTX } from './expr.js';
+import { beta } from './mode.js';
 import * as S from './schema.js';
 import { addImages } from './images.js';
 import { openCamera } from './capture.js';
@@ -132,7 +133,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
   let pendingRedraw = false;
   /** Fields marked `pull` fill themselves from another survey for the same site. Only fields that are empty, or still hold what was filled in, are touched: what the crew typed is never overwritten. */
   const pullAll = () => {
-    if (!ctx.pullFor) return false; let any = false;
+    if (!ctx.pullFor || !beta()) return false; let any = false;
     for (const pg of survey.pages) for (const f of pg.fields) {
       if (!f.pull) continue;
       const cur = sub.answers[f.name], p = pulled[f.name];
@@ -253,7 +254,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
       hint,
       controls[f.type](f, item, set, path),
       err,
-      f.pull && !prefix ? pullNoteEl(f, entry) : null,
+      f.pull && !prefix && beta() ? pullNoteEl(f, entry) : null,
       ing && !prefix ? ingFooter(f, item, path, wrap, entry, set) : null,
     ].filter(Boolean));
     return wrap;
@@ -263,7 +264,7 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
   /** What the camera tells the crew to shoot for this slot, so the photo links to the right wire. */
   function photoTip(f, item, path) {
     if (f.tip) return f.tip;
-    if (!f.slot) return '';
+    if (!f.slot || !beta()) return '';
     const m = /^(wires\w)\[\d+\]\./.exec(path), arr = m ? sub.answers[m[1]] : null;
     if (!arr) return `Take a photo of the ${f.slot}`;
     const level = item.level ?? arr.indexOf(item) + 1;
@@ -738,13 +739,13 @@ export function renderForm(ctx, sub, { startPage = 0, focusPath = null, onExit, 
     const r = h('div', { class: 'screen ing' },
       h('header', { class: 'ing-head' },
         h('div', { class: 'ing-top' }, h('button', { type: 'button', class: 'iconbtn ink', 'aria-label': 'Sections', onclick: () => { saveNow(); openDrawer(); } }, icon('menu', 20)),
-          h('div', { class: 'ing-title' }, h('b', {}), h('small', {})), h('button', { type: 'button', class: 'ing-pill', onclick: openCheck }, '')),
+          h('div', { class: 'ing-title' }, h('b', {}), h('small', {})), h('button', { type: 'button', class: 'ing-pill', onclick: () => { if (beta()) openCheck(); } }, '')),
         h('div', { class: 'ing-progrow' }, h('div', { class: 'ing-prog' }, h('i')), h('b', { class: 'ing-pct' }), h('small', { class: 'ing-fields muted' })),
         h('div', { class: 'ing-tabs' })),
       banner ? h('div', { class: 'welcome-back' }, icon('check', 18), h('div', {}, ...String(banner).split('|').map((t, i) => (i ? h('small', {}, t) : h('b', {}, t))))) : null,
       h('div', { class: 'ing-sechead' }, h('div', { class: 'sh-l' }, h('b'), h('small', { class: 'muted' })), h('div', { class: 'sh-r' }, h('div', { class: 'ing-prog sm' }, h('i')), h('b', { class: 'sh-pct' }))),
       body,
-      h('footer', { class: 'ing-bar' }, h('button', { type: 'button', class: 'btn ing-prev', onclick: () => sectionJump(-1) }, 'Previous'), h('button', { type: 'button', class: 'btn primary', onclick: openCheck }, 'Check survey'), h('button', { type: 'button', class: 'btn ing-next', onclick: () => sectionJump(1) }, 'Next')));
+      h('footer', { class: 'ing-bar' }, h('button', { type: 'button', class: 'btn ing-prev', onclick: () => sectionJump(-1) }, 'Previous'), beta() ? h('button', { type: 'button', class: 'btn primary', onclick: openCheck }, 'Check survey') : null, h('button', { type: 'button', class: 'btn ing-next', onclick: () => sectionJump(1) }, 'Next')));
     body.classList.add('ing-body');
     return r;
   }

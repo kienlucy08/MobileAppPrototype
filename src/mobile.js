@@ -12,6 +12,7 @@ import { Lookups } from './lookups.js';
 import { SiteData } from './sitedata.js';
 import { APP_VERSION } from './reporter.js';
 import { BUILD } from './build.js';
+import { MODE, beta, setMode } from './mode.js';
 import { mobileLibrary, STRUCTURE_ID } from './mdata.js';
 import { setChoices } from './expr.js';
 import { describe } from './errors.js';
@@ -40,7 +41,7 @@ const siteData = new SiteData({ server, engine, storageKey: K('sitedata'), struc
 siteData.titleOf = (id) => library.get(id)?.title;
 await engine.start();
 // a sent survey stays listed for 30 days as proof, then clears on its own
-for (const s of [...engine.subs.values()]) if (!s.shared && s.status === 'complete' && s.submittedAt && Date.now() - s.submittedAt > 30 * 86400000) await engine.deleteSub(s.id);
+if (beta()) for (const s of [...engine.subs.values()]) if (!s.shared && s.status === 'complete' && s.submittedAt && Date.now() - s.submittedAt > 30 * 86400000) await engine.deleteSub(s.id);
 
 // ---- shared context for the screen modules ---------------------------------------------------------
 const M = { h, icon, db, server, engine, auth, library, lookups, siteData, device, LS, K, qs, describe, uid, setChoices, views: {} };
@@ -56,8 +57,8 @@ document.getElementById('app').append($root);
 
 let view = { name: 'login' }; const stack = [];
 const NO_TABS = new Set(['login', 'orgpick', 'form', 'sitepick', 'unalloc', 'attach', 'claim', 'errordetail', 'copysource', 'copypreview', 'ended', 'drafts']);
-const TAB_OF = { home: 'home', visit: 'home', mysurveys: 'home', scope: 'home', accesschanged: 'home', queue: 'queue', health: 'health', storage: 'health', errordetail: 'health', profile: 'profile', access: 'profile' };
-const TABS = [['home', 'My work', 'home'], ['queue', 'Queue', 'queue'], ['health', 'Health', 'pulse'], ['profile', 'Profile', 'user']];
+const TAB_OF = { home: 'home', visit: 'home', mysurveys: 'home', scope: 'home', accesschanged: 'home', queue: 'queue', health: 'health', storage: 'health', errordetail: beta() ? 'health' : 'queue', profile: 'profile', access: 'profile' };
+const TABS = [['home', 'My work', 'home'], ['queue', 'Queue', 'queue'], ...(beta() ? [['health', 'Health', 'pulse']] : []), ['profile', 'Profile', 'user']];
 
 M.go = (name, params = {}, { replace = false } = {}) => {
   $screen.firstChild?.cleanup?.();
@@ -249,4 +250,9 @@ async function boot() {
 }
 M.afterSignIn = ((prev) => () => { prev?.(); lookups.install({ username: auth.profile.username, email: auth.profile.email }, auth.profile); siteData.install(); })(M.afterSignIn);
 await boot();
-window.__fc = { M, server, engine, auth, library, LS, demo: M.demo || {} };
+window.__fc = { M, server, engine, auth, library, LS, demo: M.demo || {}, mode: MODE };
+// A small MVP / Beta switch in the corner when the phone is opened on its own (inside the demo page, the demo page has it).
+if (window.self === window.top) {
+  const sw = h('div', { class: 'modesw', role: 'group', 'aria-label': 'Version' }, ...[['mvp', 'MVP'], ['beta', 'Beta']].map(([m, l]) => h('button', { type: 'button', class: MODE === m ? 'on' : '', onclick: () => { setMode(m); const u = new URL(location.href); u.searchParams.set('mode', m); location.href = u.href; } }, l)));
+  document.body.append(sw);
+}

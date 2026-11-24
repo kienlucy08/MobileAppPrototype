@@ -249,3 +249,12 @@ Placements are suggestions against the Nov 5 guardrail, not decisions; they are 
 - **Per-survey history** on the visit page; **start without a visit** stays at the bottom of the home screen.
 - Not built (post-MVP or project management phase): auto call-outs from field rules, dashboard instead of email, SkyFleet and Everest integrations, plumb and twist adjustment survey.
 
+
+
+## MVP and Beta modes (Nov 19)
+
+The prototype has a corner switch, MVP | Beta, on the demo page (top right) and on the phone when it is opened on its own. It is kept in the browser and can be forced with `?mode=mvp` or `?mode=beta`. The default is MVP.
+
+**MVP** is exactly what ClickUp "MVP · Phase 1 (baseline app)" lists: offline and queue, camera (0.5x, multi capture), coded errors that name the photo, versioned schemas, N/A and Could not record, library by scope, Ingress-style pages with the sections drawer, finish options, copy between surveys, sign-in with organization picker and switching, roles, and the PM feature (My work with assigned visits, map, visit detail, status actions, offline status changes, attach to a visit, access ending).
+
+**Beta** adds what the ticket puts later (see `src/mode.js`, `BETA_ONLY`): Health tab, Check survey, claim visits, Everyone's and Group by visit, assigning and taking over surveys, the next-survey prompt and Surveys in this visit, free phone storage and the 30-day clean-up, fill what is already known, calculations in the field, guided camera with photo prompts, confirm organization before sending.

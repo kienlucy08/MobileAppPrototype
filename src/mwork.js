@@ -3,6 +3,7 @@
 // phone; Start / Block / Unblock / Complete queue offline and sync later with an idempotency key (so a replay cannot apply twice).
 
 import { AppError, NetError, describe } from './errors.js';
+import { beta } from './mode.js';
 
 const TONE = { assigned: '#1F6FB5', in_progress: '#424CCC', blocked: '#D98C1A', complete: '#2E8B57', unassigned: '#5A6378' };
 const COL = { done: '#2E8B57', prog: '#424CCC', warn: '#D98C1A', none: '#8F9AAE', open: '#C3CAD8' };      // green complete, indigo in progress, amber blocked or overdue
@@ -17,6 +18,7 @@ export function install(M) {
   let open = [];                                         // unassigned visits (claim list)
   let flushing = false, claimMsg = '';
 
+  if (LS.get('vmode', '') !== (beta() ? 'beta' : 'mvp')) { visits = []; ops = []; LS.set('vmode', beta() ? 'beta' : 'mvp'); }   // the MVP and Beta lists differ, so switching fetches again
   if (LS.get('vschema', 0) !== 2) { visits = []; ops = []; LS.set('vschema', 2); }      // older cached visits (one survey each) are dropped and fetched again
   const save = () => { LS.set('visits', visits); LS.set('vops', ops); };
   M.visitList = () => visits;
@@ -33,7 +35,9 @@ export function install(M) {
     if (!M.auth.signedIn || !M.online()) return;
     try {
       await flush(); const r = await server.visitsAll({ org: 'all' });
-      visits = r.visits.map((sv) => (ops.some((o) => o.id === sv.id) ? byId(sv.id) || sv : sv));     // a visit with a change still waiting to sync keeps its local copy
+      // MVP: your assigned visits, with the surveys that are yours (assigning and sharing surveys is Phase 2)
+      const shape = (x) => (beta() ? x : x.mine ? { ...x, surveys: (x.surveys || []).filter((s) => s.mine) } : null);
+      visits = r.visits.map((sv) => (ops.some((o) => o.id === sv.id) ? byId(sv.id) || sv : shape(sv))).filter(Boolean);     // a visit with a change still waiting to sync keeps its local copy
       save(); M.redraw();
     } catch { /* offline or signed out: keep the cached list */ }
   }
@@ -112,7 +116,7 @@ export function install(M) {
   const visitBucket = (v) => (v.status === 'complete' ? 'done' : v.status === 'blocked' || overdue(v) ? 'warn' : v.status === 'in_progress' ? 'prog' : 'none');
   /** The next survey worth opening in a visit: not submitted, not blocked, nothing waiting on it; required first, then mine, then open ones. Surveys that belong to someone else are not suggested. */
   M.nextSurvey = (visitId, afterId) => {
-    const v = byId(visitId); if (!v) return null;
+    const v = byId(visitId); if (!v || !beta()) return null;
     const ok = (sv) => sv.id !== afterId && !sv.submitted && !sv.blocked && (sv.mine || !sv.assignee) && ['Not started', 'Draft', 'Not assigned'].includes(surveyState(v, sv).label);
     const pick = (v.surveys || []).filter(ok).sort((a, b) => (a.need === b.need ? 0 : a.need === 'required' ? -1 : 1) || (b.mine - a.mine))[0];
     return pick ? { visit: v, sv: pick } : null;
@@ -122,6 +126,11 @@ export function install(M) {
     const n = (x) => String(x ?? '').trim().toLowerCase(); if (!n(siteId)) return null;
     const hits = visits.filter((v) => n(v.siteId) === n(siteId) && (!orgId || v.orgId === orgId) && (v.surveys || []).some((x) => x.id === surveyId));
     return hits.find((v) => v.status !== 'complete') || hits[0] || null;
+  };
+  /** Visits of mine on the same site id as this survey's answer: the easiest match (a site id is typed or picked, a location is only approximate). */
+  M.sameSiteVisits = (sub) => {
+    const n = (x) => String(x ?? '').trim().toLowerCase(), id = n(sub.answers?.siteId); if (!id) return [];
+    return visits.filter((x) => n(x.siteId) === id && (!sub.orgId || x.orgId === sub.orgId) && x.mine && x.status !== 'unassigned').sort((a, b) => (a.status === 'complete') - (b.status === 'complete') || a.due.localeCompare(b.due));
   };
   /** Take it if it is not yours yet, then open it. One tap from anywhere. */
   M.takeAndOpen = async (v, sv) => { if (!sv.mine) await actSurvey(v, sv, 'assign'); await M.openSurveyForVisit(v, sv.id); };
@@ -163,7 +172,7 @@ export function install(M) {
       h('button', { type: 'button', class: 'srow-main', onclick: () => { if (o.showOrg) { LS.set('org', x.orgId); server.setOrg(x.orgId); } M.go('visit', { id: x.id }); } },
         h('div', { class: 'vtop' }, h('b', { class: 'bigt' }, sv.title), M.pill(label, stTone(sv, st, x))),
         o.nested ? null : h('div', { class: 'sub' }, x.name),
-        h('div', { class: 'vmeta' }, o.nested ? null : M.pill(x.scope, SCOPE_TONE[x.scope] || 'muted'), sv.need === 'optional' ? h('small', { class: 'muted' }, 'optional') : null, o.nested ? null : dueLine(x), o.who && sv.mine ? h('small', { class: 'me' }, 'Yours') : null, o.showOrg ? M.pill(M.orgName(x.orgId), 'org') : null, x.pending ? h('small', { class: 'sync' }, icon('refresh', 12), 'Syncs when you have signal') : null),
+        h('div', { class: 'vmeta' }, o.nested ? null : M.pill(x.scope, SCOPE_TONE[x.scope] || 'muted'), sv.need === 'optional' || sv.need === 'added' ? h('small', { class: 'muted' }, sv.need === 'added' ? 'added to this visit' : 'optional') : null, o.nested ? null : dueLine(x), o.who && sv.mine ? h('small', { class: 'me' }, 'Yours') : null, o.showOrg ? M.pill(M.orgName(x.orgId), 'org') : null, x.pending ? h('small', { class: 'sync' }, icon('refresh', 12), 'Syncs when you have signal') : null),
         sv.blocked ? h('div', { class: 'vblock' }, `Blocked: ${sv.reason}`) : null),
       acts.length ? h('div', { class: 'row2s' }, ...acts) : null);
   };
@@ -188,16 +197,16 @@ export function install(M) {
 
   M.views.home = (v) => {
     const body = h('div', { class: 'scroll pad' });
-    v.mode ||= 'list'; v.who ||= 'mine'; v.group ||= false; v.pick ||= null;
+    v.mode ||= 'list'; v.who ||= 'mine'; v.group ||= !beta(); v.pick ||= null;
     const draw = () => {
       const all = M.org() === 'all', every = visible();
       const items = every.flatMap((x) => (x.surveys || []).filter((sv) => v.who === 'all' || sv.mine).map((sv) => ({ x, sv })));
       const seg = h('div', { class: 'seg' }, [['list', 'List'], ['map', 'Map']].map(([m, l]) => h('button', { type: 'button', class: v.mode === m ? 'on' : '', onclick: () => { v.mode = m; draw(); } }, l)));
       const chip = (label, on, fn) => h('button', { type: 'button', class: 'chip-btn' + (on ? ' on' : ''), onclick: fn }, label);
       const filters = h('div', { class: 'chipbar' }, chip('Mine', v.who === 'mine', () => { v.who = 'mine'; draw(); }), chip('Everyone’s', v.who === 'all', () => { v.who = 'all'; draw(); }), chip('Group by visit', v.group, () => { v.group = !v.group; v.pick = null; draw(); }));
-      const kids = [saveState(), seg, filters];
-      if (!items.length) kids.push(h('div', { class: 'empty-state' }, h('div', { class: 'empty-ico' }, icon('list', 28)), h('b', {}, v.who === 'mine' ? 'Nothing is assigned to you yet' : 'No surveys on your sites yet'), h('p', { class: 'muted' }, v.who === 'mine' ? 'You can see every survey on your sites and take one for yourself.' : 'Nothing to show.'),
-        v.who === 'mine' ? h('button', { type: 'button', class: 'btn primary big', onclick: () => { v.who = 'all'; draw(); } }, 'See everyone’s surveys') : null, h('button', { type: 'button', class: 'btn big', onclick: () => M.go('claim') }, 'Find unassigned visits')));
+      const kids = [saveState(), seg, ...(beta() ? [filters] : [])];
+      if (!items.length) kids.push(h('div', { class: 'empty-state' }, h('div', { class: 'empty-ico' }, icon('list', 28)), h('b', {}, v.who === 'mine' ? 'Nothing is assigned to you yet' : 'No surveys on your sites yet'), h('p', { class: 'muted' }, !beta() ? 'Visits your office assigns to you show up here. You can still start a survey without a visit.' : v.who === 'mine' ? 'You can see every survey on your sites and take one for yourself.' : 'Nothing to show.'),
+        beta() && v.who === 'mine' ? h('button', { type: 'button', class: 'btn primary big', onclick: () => { v.who = 'all'; draw(); } }, 'See everyone’s surveys') : null, beta() ? h('button', { type: 'button', class: 'btn big', onclick: () => M.go('claim') }, 'Find unassigned visits') : null));
       else if (v.mode === 'map') kids.push(mapView(items, v, draw));
       else {
         const o = { showOrg: all, who: v.who === 'all' };
@@ -263,7 +272,7 @@ export function install(M) {
     };
     const draw = () => {
       const x = byId(v.id); if (!x) { box.replaceChildren(h('p', { class: 'muted' }, 'This visit is no longer on your list.')); return; }
-      const req = (x.surveys || []).filter((s2) => s2.need === 'required'), opt = (x.surveys || []).filter((s2) => s2.need === 'optional'), rc = reqCount(x);
+      const req = (x.surveys || []).filter((s2) => s2.need === 'required'), opt = (x.surveys || []).filter((s2) => s2.need === 'optional'), added = (x.surveys || []).filter((s2) => s2.need === 'added'), rc = reqCount(x);
       box.replaceChildren(...[
         h('div', {}, M.statusPill(x.status, overdue(x)), x.pending ? h('small', { class: 'sync' }, icon('refresh', 12), 'Syncs when you have signal') : null),
         h('div', { class: 'two' }, h('div', { class: 'card mini' }, h('small', { class: 'cap' }, 'ACCOUNTABLE'), h('b', {}, x.accountable || 'Nobody yet')), h('div', { class: 'card mini' }, h('small', { class: 'cap' }, 'DUE'), h('b', {}, M.fmtDue(x.due)))),
@@ -275,6 +284,7 @@ export function install(M) {
         !x.mine ? h('div', { class: 'info-card' }, h('b', {}, 'You can see this visit'), h('small', { class: 'block' }, 'Every survey on it is listed below. Assign one to yourself to start it.')) : null,
         h('h3', {}, 'Required surveys'), ...req.map((sv) => card(x, sv)),
         opt.length ? h('h3', {}, 'Optional surveys') : null, ...opt.map((sv) => card(x, sv)),
+        added.length ? h('h3', {}, 'Added to this visit') : null, ...added.map((sv) => card(x, sv)),
         h('h3', {}, 'History'), h('div', { class: 'card history' }, ...(x.history || []).slice().reverse().map((hi) => h('div', { class: 'hrow' }, h('small', { class: 'muted' }, hi.at.slice(5).replace('-', '/')), h('span', {}, hi.text)))),
         h('small', { class: 'muted center' }, 'Changes sync when you have signal.')].filter(Boolean));
     };
@@ -318,19 +328,28 @@ export function install(M) {
 
   // ---- attach an unallocated survey to a visit ----------------------------------------------------
   M.views.attach = (v) => {
-    const sub = engine.subs.get(v.subId); let pick = byId(sub?.visitId)?.id || '';
+    const sub = engine.subs.get(v.subId); const same = M.sameSiteVisits(sub), sameIds = new Set(same.map((x) => x.id));
+    let pick = byId(sub?.visitId)?.id || same[0]?.id || '';
     const list = h('div', { class: 'org-list' });
-    const draw = () => list.replaceChildren(...visible().filter((x) => x.mine && x.status !== 'complete' && x.status !== 'unassigned').map((x) => h('button', { type: 'button', class: 'org-card' + (pick === x.id ? ' on' : ''), onclick: () => { pick = x.id; draw(); } },
-      h('span', { class: 'radio' + (pick === x.id ? ' on' : '') }), h('div', { class: 'grow' }, h('b', {}, x.name), h('div', { class: 'vmeta' }, M.pill(x.scope, SCOPE_TONE[x.scope] || 'muted'), dueLine(x))))));
+    const card = (x, match) => h('button', { type: 'button', class: 'org-card' + (pick === x.id ? ' on' : ''), onclick: () => { pick = x.id; draw(); } },
+      h('span', { class: 'radio' + (pick === x.id ? ' on' : '') }), h('div', { class: 'grow' }, h('b', {}, x.name), h('div', { class: 'vmeta' }, M.pill(x.scope, SCOPE_TONE[x.scope] || 'muted'), match ? M.pill('Same site ID', 'complete') : null, x.status === 'complete' ? M.pill('Complete', 'complete') : dueLine(x))));
+    const draw = () => {
+      const others = visible().filter((x) => x.mine && x.status !== 'unassigned' && !sameIds.has(x.id) && x.status !== 'complete');
+      list.replaceChildren(...[
+        same.length ? h('h3', {}, 'Same site') : null, ...same.map((x) => card(x, true)),
+        others.length ? h('h3', {}, same.length ? 'Other visits' : 'Your visits') : null, ...others.map((x) => card(x, false))].filter(Boolean));
+    };
     draw();
-    return h('div', { class: 'mcol' }, M.appbar('Attach to a visit', `${sub?.surveyTitle || 'Survey'} (unallocated)`),
-      h('div', { class: 'scroll pad' }, h('p', { class: 'muted' }, 'Pick one of your assigned visits.'), list, h('small', { class: 'muted' }, 'Or leave it unallocated. The web app can match it later.')),
+    const sid = String(sub?.answers?.siteId ?? '').trim();
+    return h('div', { class: 'mcol' }, M.appbar('Add to a site visit', `${sub?.surveyTitle || 'Survey'}${sid ? ` · ${sid}` : ' (no site yet)'}`),
+      h('div', { class: 'scroll pad' }, h('p', { class: 'muted' }, same.length ? 'These visits are at the same site as this survey. It will be listed with the visit’s other surveys.' : 'Pick the visit this was done with. Surveys that are not part of its scope of work, like a JSA, daily update or rigging, are added to it.'), list, h('small', { class: 'muted' }, 'We match on the site ID because a location is only approximate. Or leave it unallocated: the web app can match it later.')),
       h('div', { class: 'footbar' }, h('button', { type: 'button', class: 'btn primary big', onclick: async () => {
         if (!pick) return M.toast('Pick a visit first.');
-        sub.visitId = pick; sub.siteId = byId(pick)?.siteId; await M.db.put('submissions', sub);
-        try { await server.attachVisit({ visitId: pick, recordId: sub.id }); M.toast('Attached to the visit.'); } catch (e) { M.toast(e instanceof NetError ? 'Attached on this phone. The link syncs when you have signal.' : describe(e.code).cause); }
+        const x = byId(pick); sub.visitId = pick; sub.siteId = x?.siteId; sub.siteLabel = x?.name; await M.db.put('submissions', sub);
+        if (x && !(x.surveys || []).some((s) => s.id === sub.surveyId)) { x.surveys = [...(x.surveys || []), { id: sub.surveyId, title: sub.surveyTitle, need: 'added', blocked: false, reason: '', submitted: false, assignee: M.device.email, assigneeName: M.device.name, mine: true }]; save(); }
+        try { await server.attachVisit({ visitId: pick, recordId: sub.id, surveyId: sub.surveyId, title: sub.surveyTitle }); M.toast('Added to the visit.'); } catch (e) { M.toast(e instanceof NetError ? 'Added on this phone. The link syncs when you have signal.' : describe(e.code).cause); }
         M.back();
-      } }, 'Attach to this visit')));
+      } }, 'Add to this visit')));
   };
 
   // ---- demo controls (the PM / web app side) ----------------------------------------------------

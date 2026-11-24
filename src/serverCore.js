@@ -4,7 +4,7 @@
 // Everything is idempotent: replaying a request never creates a second record, photo, op or issue.
 
 import { AppError } from './errors.js';
-import { SCOPES } from './scopes.js';
+import { SCOPES, ADDONS } from './scopes.js';
 import { newState, applyOp, materialize, livePhotos, attribution } from './crdt.js';
 
 export const MAX_PHOTO_BYTES = 30 * 1024 * 1024;
@@ -108,6 +108,7 @@ export class ServerCore {
       }
     }
     if (visitId && this.state.attached[id] !== visitId) this.state.attached[id] = visitId;
+    { const v = visitId && this.state.visits.find((x) => x.id === visitId); if (v && surveyId && !(SCOPES[v.scope] || []).some((x) => x.id === surveyId) && !(v.extras || {})[surveyId]) (v.extras ||= {})[surveyId] = { title: ADDONS[surveyId] || surveyId, by: user }; }
     this._dirty();
     return { have: Object.keys(s.received), dupe };
   }
@@ -154,6 +155,7 @@ export class ServerCore {
   _pub(v, u) {
     const out = Object.fromEntries(VISIT_FIELDS.map((k) => [k, v[k]]));
     out.surveys = (SCOPES[v.scope] || []).map((x) => { const a = this._sAssignee(v, x); return { ...x, blocked: !!v.blocks?.[x.id], reason: v.blocks?.[x.id] || '', submitted: !!v.submitted?.[x.id], assignee: a, assigneeName: this._name(a), mine: !!u && a === u.email }; });
+    for (const [id, e] of Object.entries(v.extras || {})) out.surveys.push({ id, title: e.title, need: 'added', blocked: false, reason: '', submitted: !!v.submitted?.[id], assignee: e.by, assigneeName: this._name(e.by), mine: !!u && e.by === u.email });
     if (u) out.mine = this._mine(u, v);
     return out;
   }
@@ -202,7 +204,7 @@ export class ServerCore {
   /** A survey record for a visit was delivered (committed with every photo): mark it, and finish the visit if that was the last required one. */
   _submitted(visitId, surveyId) {
     const v = this.state.visits.find((x) => x.id === visitId); if (!v || !surveyId) return;
-    const sv = (SCOPES[v.scope] || []).find((x) => x.id === surveyId); if (!sv || v.submitted[surveyId]) return;
+    const sv = (SCOPES[v.scope] || []).find((x) => x.id === surveyId) || (v.extras || {})[surveyId]; if (!sv || v.submitted[surveyId]) return;
     v.submitted[surveyId] = 1; delete v.blocks[surveyId]; v.started = true;
     const changed = this._recompute(v); this._bump(v, `${sv.title} submitted`);
     if (changed && v.status === 'complete') this._bump(v, 'Completed: every required survey is submitted');
@@ -250,11 +252,14 @@ export class ServerCore {
     const out = { visit: this._pub(v, u) }; if (key) this.state.idem[key] = out; return out;
   }
   /** Link a survey record (sent as unallocated) to one of my visits. */
-  attach(u, { visitId, recordId }) {
+  attach(u, { visitId, recordId, surveyId, title }) {
     const v = this.state.visits.find((x) => x.id === visitId);
     if (!v || !this._canSee(u, v)) throw new AppError('ERR-VISIT-403');
-    this.state.attached[recordId] = visitId; this._bump(v, 'Survey attached', `${u.firstName} ${u.lastName}`);
-    const rec = this.state.subs[recordId]; if (rec?.committed) this._submitted(visitId, rec.surveyId);
+    this.state.attached[recordId] = visitId;
+    const rec = this.state.subs[recordId], sid = surveyId || rec?.surveyId;
+    if (sid && !(SCOPES[v.scope] || []).some((x) => x.id === sid)) { (v.extras ||= {})[sid] ||= { title: title || ADDONS[sid] || sid, by: u.email }; this._bump(v, `${v.extras[sid].title} added to the visit`, `${u.firstName} ${u.lastName}`); }   // not part of the scope of work: appended
+    else this._bump(v, 'Survey attached', `${u.firstName} ${u.lastName}`);
+    if (rec?.committed) this._submitted(visitId, rec.surveyId);
     return { ok: true, visit: this._pub(v, u) };
   }
   /** Demo controls for the PM / web app side. */

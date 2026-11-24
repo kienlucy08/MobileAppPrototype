@@ -2,6 +2,7 @@
 // and scope names. Placeholder data throughout. The calculation helpers are the same ones the guy-wire work uses.
 
 import { demoCloseout, plumbTwist } from './demoLibrary.js';
+import { beta } from './mode.js';
 
 export const STRUCTURE_ID = 'demo-structure-flight';      // its Guy Attachments section holds each guy level's attachment height: the source other surveys pull from
 const sec = (section, name, label, fields) => ({ section, name, label, fields });
@@ -63,7 +64,16 @@ export function structureFlight() {
 
 /** Guy Facilities: compounds A, B and C, each with measurements and wires as cards. Tension limits and cable length use the
  *  guy calculations (cable length is the real formula; the limits are placeholders). Heights come from the structure survey. */
-export function guyFacilities() {
+export function guyFacilities() { return mvpTrim(guyFacilitiesFull()); }
+/** MVP: calculations in the field and the guided camera are not in the baseline app, so those fields are not part of the survey. */
+const BETA_FIELDS = new Set(['expectedPreform', 'preformFlag', 'elevManual', 'attachElev', 'elevSource', 'wireLength', 'minT', 'maxT', 'check', 'calcNote', 'flag', 'breakingStrength', 'pullNote']);
+function mvpTrim(sv) {
+  if (beta()) return sv;
+  const keep = (f) => !BETA_FIELDS.has(f.name) && !f.guidedFor;
+  const walk = (fields) => fields.filter(keep).map((f) => (f.fields ? { ...f, fields: walk(f.fields) } : f));
+  return { ...sv, pages: sv.pages.map((p) => ({ ...p, fields: walk(p.fields) })) };
+}
+function guyFacilitiesFull() {
   const SRC = 'sitelevel(${siteId}, ${level})';
   const wires = (c) => ({ name: `wires${c}`, type: 'repeat', label: 'Level', addLabel: 'Add wire', appearance: 'cards-grid', numbered: true, fields: [
     { name: 'level', type: 'integer', label: 'Level', required: true, increment: true, constraint: '${.} > 0', constraintMessage: 'Levels start at 1.' },
@@ -164,8 +174,14 @@ export const mobileLibrary = () => [
   closeout('TMO closeout', 'demo-tmo-closeout', 'TMO CONS MOD Closeout', '#E20074'),
   closeout('Verizon closeout', 'demo-verizon-closeout', 'Verizon CONS MOD Closeout', '#CD040B'),
   consmod('demo-consmod-prework', 'CONS-MOD Prework Inspection', '#A21CAF', 'PREWORK'), consmod('demo-consmod-sector', 'CONS-MOD Sector COP', '#EA580C', 'SECTOR COP'), consmod('demo-consmod-ground', 'CONS-MOD Ground COP', '#16A34A', 'GROUND COP'),
-  jsa(),
+  jsa(), addon('demo-daily-update', 'Daily Update', 'Reporting', 'DAILY UPDATE', '#0E7C86'), addon('demo-rigging', 'Rigging Inspection', 'Rigging', 'RIGGING', '#B45309'),
 ];
+
+/** Work done alongside an inspection or closeout: it is added to the site visit rather than being part of a scope of work. Placeholder content. */
+function addon(id, title, scope, text, color) {
+  return { id, version: 3, title, scope, tile: { text, color }, demo: true, pages: [sec(title, 'main', 'Details', [
+    { name: 'siteId', type: 'text', label: 'Site', required: true, check: true }, { name: 'notes', type: 'text', label: 'Notes', appearance: 'multiline' }, photo('photos', 'Photos', { minFiles: 0, maxFiles: 20 })])] };
+}
 
 /** CONS-MOD workflow: Prework, Sector COP and Ground COP are all required for the visit. Placeholder content. */
 function consmod(id, title, color, text) {
